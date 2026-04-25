@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Debates · India Quant{% endblock %}
+{% block content %}
+
+<div class="page-head"><div>
+  <h1>Bull / Bear debates</h1>
+  <div class="desc">Synthesised from technical, fundamental, sentiment, macro & ML signals.</div>
+</div></div>
+
+<div class="grid" style="gap:14px">
+  {% for r in rows %}
+  <div class="card">
+    <div class="card-hd">
+      <div class="flex items-center gap-3">
+        <a class="ticker-pill" href="/ticker/{{ r.ticker.replace('.NS','') }}">{{ r.ticker.replace('.NS','') }}</a>
+        <span class="meta">{{ r.date }}</span>
+        {% set v = r.judge.verdict %}
+        {% if v == 'Bullish' %}<span class="badge bull">Bullish · {{ r.judge.conviction }}/10</span>
+        {% elif v == 'Bearish' %}<span class="badge bear">Bearish · {{ r.judge.conviction }}/10</span>
+        {% elif v == 'Mixed' %}<span class="badge mixed">Mixed</span>
+        {% elif v %}<span class="badge">{{ v }}</span>{% endif %}
+        <span class="meta">horizon: {{ r.judge.suggested_horizon or '—' }}</span>
+      </div>
+      <span class="meta">{{ r.created_at }}</span>
+    </div>
+    <div class="card-bd grid grid-3">
+      <div class="panel bull">
+        <h3>Bull case {% if r.bull.source == 'llm' %}<span class="badge">llm</span>{% endif %}</h3>
+        <div class="text-sm">{{ r.bull.bull_case }}</div>
+        {% if r.bull.key_catalysts %}<ul>{% for c in r.bull.key_catalysts %}<li>{{ c }}</li>{% endfor %}</ul>{% endif %}
+        <div class="foot">target: {{ r.bull.target_price or '—' }} · conf {{ r.bull.confidence or '—' }}/10</div>
+      </div>
+      <div class="panel bear">
+        <h3>Bear case {% if r.bear.source == 'llm' %}<span class="badge">llm</span>{% endif %}</h3>
+        <div class="text-sm">{{ r.bear.bear_case }}</div>
+        {% if r.bear.key_risks %}<ul>{% for c in r.bear.key_risks %}<li>{{ c }}</li>{% endfor %}</ul>{% endif %}
+        <div class="foot">downside: {{ r.bear.downside_target or '—' }} · conf {{ r.bear.confidence or '—' }}/10</div>
+      </div>
+      <div class="panel muted">
+        <h3>Judge</h3>
+        <div class="text-sm">Net: <span class="num">{{ r.judge.net_score if r.judge.net_score is not none else '—' }}</span> · {{ r.judge.key_uncertainty }}</div>
+        {% if r.judge.watchout %}<div class="warn mt-2">⚠ {{ r.judge.watchout }}</div>{% endif %}
+      </div>
+    </div>
+  </div>
+  {% else %}
+  <div class="card"><div class="card-bd text-center muted">No debates yet. Run one from the search box above.</div></div>
+  {% endfor %}
+</div>
+
+{% endblock %}

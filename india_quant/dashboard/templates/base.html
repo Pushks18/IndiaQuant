@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}India Quant{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+  {% block head %}{% endblock %}
+</head>
+<body>
+  <header class="topbar">
+    <div class="wrap topbar-inner">
+      <a href="/" class="brand">India<span class="accent">Quant</span><span class="brand-tag">NSE/BSE · multi-agent</span></a>
+      <nav class="tabs">
+        <a class="nav-link {% if request.path == '/' %}active{% endif %}" href="/">Overview</a>
+        <a class="nav-link {% if request.path.startswith('/signals') %}active{% endif %}" href="/signals">Signals</a>
+        <a class="nav-link {% if request.path.startswith('/intraday') %}active{% endif %}" href="/intraday">Intraday</a>
+        <a class="nav-link {% if request.path.startswith('/debates') %}active{% endif %}" href="/debates">Debates</a>
+        <a class="nav-link {% if request.path.startswith('/proposals') %}active{% endif %}" href="/proposals">Proposals</a>
+      </nav>
+      <form class="topbar-search" action="/run/debate" method="post">
+        <input class="input" name="ticker" placeholder="Ticker (e.g. RELIANCE)" autocomplete="off">
+        <button class="btn primary" type="submit">Run debate</button>
+      </form>
+    </div>
+  </header>
+  <main class="wrap">
+    {% block content %}{% endblock %}
+  </main>
+  <footer class="wrap foot">Rule-based · No external LLM API · Postgres backend</footer>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

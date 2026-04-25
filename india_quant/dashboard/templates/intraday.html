@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block title %}Intraday plan · India Quant{% endblock %}
+{% block content %}
+
+<div class="page-head">
+  <div>
+    <h1>Today's intraday plan</h1>
+    <div class="desc">Opening Range Breakout (ORB) on the system's highest-conviction tickers · plan computed from yesterday's close ({{ today }}).</div>
+  </div>
+  <form method="get" class="flex gap-2 items-center">
+    <label class="text-sm text-2">Capital ₹</label>
+    <input class="input" style="width:120px" type="number" name="capital" value="{{ capital|int }}" min="10000" step="10000">
+    <label class="text-sm text-2">Risk %</label>
+    <input class="input" style="width:70px" type="number" name="risk" value="{{ '%.1f' % risk_pct }}" min="0.1" max="10" step="0.1">
+    <label class="text-sm text-2">Target ×</label>
+    <input class="input" style="width:70px" type="number" name="target" value="{{ '%.1f' % target_multiple }}" min="1.0" max="5.0" step="0.1">
+    <button class="btn primary" type="submit">Recalculate</button>
+  </form>
+</div>
+
+<section class="card section">
+  <div class="card-hd"><span class="title">Time-based action plan (IST)</span><span class="meta">execute manually on your broker app · use MIS product</span></div>
+  <div class="card-bd">
+    <table class="x" style="font-size:13px">
+      <thead><tr><th style="width:120px">Time</th><th>Action</th></tr></thead>
+      <tbody>
+        <tr><td class="num"><b>09:00 IST</b></td><td>Pre-open. Review the table below. Pick 2-3 names — never trade more than 3 setups at once.</td></tr>
+        <tr><td class="num"><b>09:15 - 09:30</b></td><td><b>WAIT.</b> Don't trade the open. Note each chosen stock's actual <b>9:30 high</b> and <b>9:30 low</b> from the chart.</td></tr>
+        <tr><td class="num"><b>09:30 - 09:35</b></td><td>Replace the table's "long_trigger" with the real 9:30 high + ₹0.50, and "short_trigger" with the real 9:30 low − ₹0.50. Place stop-loss-buy / stop-loss-sell orders at those levels.</td></tr>
+        <tr><td class="num"><b>09:30 - 14:30</b></td><td>If long-trigger hits → buy. Stop = real 9:30 low. Target = trigger + 1.5 × range. <i>Same rule for short side.</i></td></tr>
+        <tr><td class="num"><b>14:30 - 15:00</b></td><td>If still in profit, trail stop to entry. Don't add new positions after 14:30.</td></tr>
+        <tr><td class="num"><b>15:15 IST</b></td><td><b>HARD EXIT</b> — close all open positions. Don't wait for 15:20 auto-square-off (chaotic spreads).</td></tr>
+      </tbody>
+    </table>
+    <div class="warn mt-2">⚠ The trigger / stop / target prices below are <b>estimates from yesterday's ATR</b>. Use the real 9:30 high / low once market opens.</div>
+  </div>
+</section>
+
+<section class="card section">
+  <div class="card-hd">
+    <span class="title">{{ plans|length }} setups · capital ₹{{ '%0.0f' % capital }} · {{ '%.1f' % risk_pct }}% risk per trade</span>
+    <span class="meta">bias = system's directional view; "either" = trade whichever side breaks first</span>
+  </div>
+  <div class="card-bd flush"><div class="table-wrap"><table class="x">
+    <thead><tr>
+      <th>Ticker</th><th>Bias</th><th class="text-right">Conv</th><th class="text-right">Prev close</th><th class="text-right">ATR</th><th class="text-right">Range %</th>
+      <th class="text-right">Trigger</th><th class="text-right">Stop</th><th class="text-right">Target</th><th class="text-right">R:R</th>
+      <th class="text-right">Qty</th><th class="text-right">Margin (MIS)</th><th class="text-right">Max loss</th><th class="text-right">Target profit</th>
+    </tr></thead>
+    <tbody>
+      {% for p in plans %}
+      {# LONG row, only if bias allows #}
+      {% if p.bias in ('long_only', 'either') %}
+      <tr>
+        <td><a class="ticker-pill" href="/ticker/{{ p.ticker.replace('.NS','') }}">{{ p.ticker.replace('.NS','') }}</a></td>
+        <td><span class="badge bull">long</span></td>
+        <td class="text-right num">{{ p.conviction }}</td>
+        <td class="text-right num">{{ p.prev_close }}</td>
+        <td class="text-right num">{{ p.atr }}</td>
+        <td class="text-right num">{{ p.expected_range_pct }}%</td>
+        <td class="text-right num pos">{{ p.long_trigger }}</td>
+        <td class="text-right num neg">{{ p.long_stop }}</td>
+        <td class="text-right num pos">{{ p.long_target }}</td>
+        <td class="text-right num">{{ p.long_rr }}</td>
+        <td class="text-right num">{{ p.long_qty }}</td>
+        <td class="text-right num">₹{{ '{:,.0f}'.format(p.margin_required_long) }}</td>
+        <td class="text-right num neg">−₹{{ '{:,.0f}'.format(p.long_max_loss_inr) }}</td>
+        <td class="text-right num pos">+₹{{ '{:,.0f}'.format(p.long_target_profit_inr) }}</td>
+      </tr>
+      {% endif %}
+      {# SHORT row, only if bias allows #}
+      {% if p.bias in ('short_only', 'either') %}
+      <tr>
+        <td><a class="ticker-pill" href="/ticker/{{ p.ticker.replace('.NS','') }}">{{ p.ticker.replace('.NS','') }}</a></td>
+        <td><span class="badge bear">short</span></td>
+        <td class="text-right num">{{ p.conviction }}</td>
+        <td class="text-right num">{{ p.prev_close }}</td>
+        <td class="text-right num">{{ p.atr }}</td>
+        <td class="text-right num">{{ p.expected_range_pct }}%</td>
+        <td class="text-right num neg">{{ p.short_trigger }}</td>
+        <td class="text-right num pos">{{ p.short_stop }}</td>
+        <td class="text-right num neg">{{ p.short_target }}</td>
+        <td class="text-right num">{{ p.short_rr }}</td>
+        <td class="text-right num">{{ p.short_qty }}</td>
+        <td class="text-right num">₹{{ '{:,.0f}'.format(p.margin_required_short) }}</td>
+        <td class="text-right num neg">−₹{{ '{:,.0f}'.format(p.short_max_loss_inr) }}</td>
+        <td class="text-right num pos">+₹{{ '{:,.0f}'.format(p.short_target_profit_inr) }}</td>
+      </tr>
+      {% endif %}
+      {% else %}
+      <tr><td colspan="14" class="text-center muted">No high-conviction debates yet — run a few from the search box up top.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table></div></div>
+</section>
+
+<section class="card">
+  <div class="card-hd"><span class="title">House rules · don't skip these</span></div>
+  <div class="card-bd">
+    <ul style="font-size:13px; line-height:1.6; padding-left:20px">
+      <li><b>Max 3 simultaneous positions.</b> Picking too many means you can't watch any properly.</li>
+      <li><b>1% risk per trade</b> means a single losing trade = ₹{{ '{:,.0f}'.format(capital * risk_pct / 100) }}. Five losses in a row = ₹{{ '{:,.0f}'.format(capital * risk_pct * 5 / 100) }} (~5% drawdown). Stop trading for the day after 3 losses.</li>
+      <li><b>Honor the stop.</b> Place a stop-loss order on the broker, not in your head. Don't move it wider — ever.</li>
+      <li><b>Use MIS (intraday) product, not CNC.</b> 5x leverage, auto-square-off at 15:20. Margins shown above assume MIS.</li>
+      <li><b>Don't trade the first 15 min.</b> Half of all retail intraday losses happen in the open auction noise.</li>
+      <li><b>Exit by 15:15.</b> Auto-square-off slippage at 15:20 is real money lost.</li>
+      <li><b>If 9:30 range &gt; 1.5 × ATR estimate</b>, the day is unusually volatile — skip or halve qty.</li>
+      <li><b>Don't average down.</b> If a position is at stop, exit. Adding to a loser is the most expensive habit in trading.</li>
+    </ul>
+  </div>
+</section>
+
+{% endblock %}

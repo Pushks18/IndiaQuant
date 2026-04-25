@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% block title %}{{ ticker.replace('.NS','') }} · India Quant{% endblock %}
+{% block content %}
+
+<div class="page-head">
+  <div class="flex items-center gap-3">
+    <span class="ticker-pill" style="font-size:14px">{{ ticker.replace('.NS','') }}</span>
+    <h1>{{ ticker }}</h1>
+  </div>
+  <form action="/run/debate" method="post">
+    <input type="hidden" name="ticker" value="{{ ticker.replace('.NS','') }}">
+    <button class="btn primary" type="submit">Re-run analysis</button>
+  </form>
+</div>
+
+<section class="card section">
+  <div class="card-hd"><span class="title">Price (180d)</span><span class="meta">{{ history|length }} bars</span></div>
+  <div class="card-bd"><canvas id="priceChart" height="120"></canvas></div>
+</section>
+
+{% if reports %}
+<section class="card section">
+  <div class="card-hd"><span class="title">Latest analyst reports</span></div>
+  <div class="card-bd grid grid-2">
+    {% for r in reports %}
+    <div class="panel muted">
+      <div class="flex items-center" style="justify-content:space-between">
+        <span class="fw-500">{{ r.agent_name }}</span>
+        <span class="meta">{{ r.date }}</span>
+      </div>
+      <div class="mt-2 text-sm">
+      {% if r.agent_name == 'technical_analyst' %}
+        <div>Trend: <span class="num">{{ r.report.trend }}</span> · MACD: <span class="num">{{ r.report.macd_signal }}</span> · RSI: <span class="num">{{ r.report.rsi }}</span></div>
+        <div class="mt-1">Support: <span class="num neg">{{ r.report.key_levels.support or '—' }}</span> · Pivot: <span class="num">{{ r.report.key_levels.pivot or '—' }}</span> · Resistance: <span class="num pos">{{ r.report.key_levels.resistance or '—' }}</span></div>
+        <div class="mt-2 text-2 italic text-xs">{{ r.report.outlook }}</div>
+      {% elif r.agent_name == 'fundamental_analyst' %}
+        <div>P/E: <span class="num">{{ r.report.pe or '—' }}</span> (sector {{ r.report.sector_median_pe or '—' }}) · ROE: <span class="num">{{ r.report.roe or '—' }}%</span> · EPS Δ: <span class="num">{{ r.report.eps_growth or '—' }}%</span></div>
+        <div class="mt-1">
+          {% if r.report.verdict == 'bullish' %}<span class="badge bull">bullish</span>
+          {% elif r.report.verdict == 'bearish' %}<span class="badge bear">bearish</span>
+          {% else %}<span class="badge">{{ r.report.verdict }}</span>{% endif %}
+        </div>
+        {% if r.report.red_flags %}<ul style="color: var(--bear); padding-left:18px; font-size:12px;">{% for rf in r.report.red_flags %}<li>{{ rf }}</li>{% endfor %}</ul>{% endif %}
+      {% elif r.agent_name == 'sentiment_analyst' %}
+        <div>Score: <span class="num">{{ r.report.sentiment_score }}</span> · Articles: <span class="num">{{ r.report.article_count }}</span> · Conf: <span class="num">{{ r.report.confidence or '—' }}/10</span>{% if r.report.source == 'llm' %} <span class="badge">llm</span>{% endif %}</div>
+        {% if r.report.high_impact_event %}<div class="text-sm mt-1"><span class="fw-500">Event:</span> <span class="text-2">{{ r.report.high_impact_event }}</span></div>{% endif %}
+        {% if r.report.key_themes %}<ul class="mt-1">{% for th in r.report.key_themes[:3] %}<li>{{ th }}</li>{% endfor %}</ul>{% endif %}
+        {% if r.report.rbi_relevance %}<div class="warn mt-1">⚠ RBI policy in {{ r.report.rbi_days_away }}d</div>{% endif %}
+        {% if r.report.sebi_news %}<div class="neg text-xs mt-1">⚠ SEBI/insider keyword in headlines</div>{% endif %}
+        {% if r.report.top_headlines %}<ul class="mt-2 text-3 text-xs">{% for h in r.report.top_headlines[:3] %}<li>{{ h }}</li>{% endfor %}</ul>{% endif %}
+      {% elif r.agent_name == 'macro_analyst' %}
+        <div>Regime: <span class="badge">{{ r.report.regime_label }}</span> · VIX: <span class="num">{{ r.report.india_vix or '—' }}</span> · USD/INR: <span class="num">{{ r.report.usd_inr or '—' }}</span></div>
+        {% if r.report.market_breadth and r.report.market_breadth.advances is defined %}
+        <div class="mt-1">Breadth: <span class="pos">{{ r.report.market_breadth.advances }}↑</span> / <span class="neg">{{ r.report.market_breadth.declines }}↓</span> (ratio {{ r.report.market_breadth.adv_dec_ratio }})</div>
+        {% endif %}
+      {% else %}
+        <pre class="json">{{ r.report | tojson(indent=2) }}</pre>
+      {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+{% if debates %}
+<section class="card section">
+  <div class="card-hd"><span class="title">Debate history</span></div>
+  <div class="card-bd grid">
+    {% for d in debates %}
+    <div class="panel muted">
+      <div class="flex items-center gap-2 meta mb-2">
+        <span>{{ d.date }}</span>
+        {% set v = d.judge.verdict %}
+        {% if v == 'Bullish' %}<span class="badge bull">{{ v }} · {{ d.judge.conviction }}/10</span>
+        {% elif v == 'Bearish' %}<span class="badge bear">{{ v }} · {{ d.judge.conviction }}/10</span>
+        {% elif v == 'Mixed' %}<span class="badge mixed">{{ v }}</span>
+        {% else %}<span class="badge">{{ v }}</span>{% endif %}
+        <span>{{ d.judge.suggested_horizon }}</span>
+      </div>
+      <div class="grid grid-2 text-sm">
+        <div><span class="pos fw-500">Bull:</span> {{ d.bull.bull_case }}</div>
+        <div><span class="neg fw-500">Bear:</span> {{ d.bear.bear_case }}</div>
+      </div>
+      {% if d.judge.watchout %}<div class="warn mt-2">⚠ {{ d.judge.watchout }}</div>{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+{% if proposals %}
+<section class="card section">
+  <div class="card-hd"><span class="title">Trade proposals</span></div>
+  <div class="card-bd flush"><div class="table-wrap"><table class="x">
+    <thead><tr><th>Date</th><th>Inst.</th><th>Dir.</th><th class="text-right">Entry</th><th class="text-right">Stop</th><th class="text-right">T1</th><th class="text-right">R:R</th><th class="text-right">Size</th></tr></thead>
+    <tbody>
+      {% for p in proposals %}
+      <tr>
+        <td class="num text-xs">{{ p.date }}</td>
+        <td><span class="badge">{{ p.instrument }}</span></td>
+        <td>{% if p.direction == 'long' %}<span class="badge bull">long</span>{% else %}<span class="badge bear">short</span>{% endif %}</td>
+        <td class="text-right num">{{ p.entry_price }}</td>
+        <td class="text-right num neg">{{ p.stop_loss }}</td>
+        <td class="text-right num pos">{{ p.target_1 }}</td>
+        <td class="text-right num">{{ p.risk_reward }}</td>
+        <td class="text-right num">{{ '%.2f' % (p.position_size_pct * 100) }}%</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table></div></div>
+</section>
+{% endif %}
+
+{% endblock %}
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script>
+  const history = {{ history | tojson }};
+  if (history.length) {
+    const ctx = document.getElementById('priceChart').getContext('2d');
+    new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: history.map(h => h.date),
+        datasets: [{
+          label: 'Close',
+          data: history.map(h => h.close),
+          borderColor: '#059669',
+          backgroundColor: 'rgba(5,150,105,0.07)',
+          fill: true, tension: 0.15, pointRadius: 0, borderWidth: 1.8,
+        }]
+      },
+      options: {
+        responsive: true, animation: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { ticks: { color: '#9ca3af', maxTicksLimit: 8 }, grid: { color: '#f3f4f6' } },
+          y: { ticks: { color: '#9ca3af' }, grid: { color: '#f3f4f6' } }
+        }
+      }
+    });
+  }
+</script>
+{% endblock %}

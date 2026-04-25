@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Proposals · India Quant{% endblock %}
+{% block content %}
+
+<div class="page-head"><div>
+  <h1>Trade proposals</h1>
+  <div class="desc">Entry, stop, targets and R:R from rule-based trader agent.</div>
+</div></div>
+
+<div class="card">
+  <div class="card-bd flush"><div class="table-wrap"><table class="x">
+    <thead><tr>
+      <th>Ticker</th><th>Date</th><th>Inst.</th><th>Dir.</th>
+      <th class="text-right">Entry</th><th class="text-right">Stop</th>
+      <th class="text-right">T1</th><th class="text-right">T2</th>
+      <th class="text-right">R:R</th><th class="text-right">Size %</th>
+      <th>Status</th><th>Rationale</th>
+    </tr></thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td><a class="ticker-pill" href="/ticker/{{ r.ticker.replace('.NS','') }}">{{ r.ticker.replace('.NS','') }}</a></td>
+        <td class="num text-xs text-3">{{ r.date }}</td>
+        <td><span class="badge">{{ r.instrument }}</span></td>
+        <td>
+          {% if r.direction == 'long' %}<span class="badge bull">long</span>
+          {% else %}<span class="badge bear">short</span>{% endif %}
+        </td>
+        <td class="text-right num">{{ r.entry_price }}</td>
+        <td class="text-right num neg">{{ r.stop_loss }}</td>
+        <td class="text-right num pos">{{ r.target_1 }}</td>
+        <td class="text-right num text-3">{{ r.target_2 or '—' }}</td>
+        <td class="text-right num">{{ r.risk_reward }}</td>
+        <td class="text-right num">{{ '%.2f' % (r.position_size_pct * 100) }}%</td>
+        <td>
+          {% if r.risk_status == 'APPROVED' %}<span class="badge bull">approved</span>
+          {% elif r.risk_status == 'REJECTED' %}<span class="badge bear">rejected</span>
+          {% elif r.risk_status == 'MODIFIED' %}<span class="badge mixed">modified</span>
+          {% else %}<span class="badge">{{ r.risk_status or 'pending' }}</span>{% endif %}
+        </td>
+        <td class="text-xs text-2" style="max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ r.rationale }}">{{ r.rationale }}</td>
+      </tr>
+      {% else %}<tr><td colspan="12" class="text-center muted">No trade proposals yet. Run a debate to generate one.</td></tr>{% endfor %}
+    </tbody>
+  </table></div></div>
+</div>
+
+{% endblock %}

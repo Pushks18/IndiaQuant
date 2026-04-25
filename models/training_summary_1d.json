@@ -1,0 +1,16 @@
+{
+  "horizon": "1d",
+  "walk_forward": {
+    "n_folds": 7,
+    "mean_ic": -0.026725290510932354,
+    "std_ic": 0.02252285070495546,
+    "ic_tstat": -2.906529277176544,
+    "ir": -1.1865850817543917,
+    "hlz_pass": "False",
+    "horizon": "1d"
+  },
+  "models_saved": [
+    "/Users/pushkaraj/Documents/Trading/models/xgb_1d.pkl",
+    "/Users/pushkaraj/Documents/Trading/models/lgb_1d.pkl"
+  ]
+}

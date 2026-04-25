@@ -1,0 +1,22 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.ipynb_checkpoints/
+venv/
+.venv/
+
+# Models / data
+models/*.pkl
+*.log
+
+# Editor / OS
+.DS_Store
+*.swp
+.vscode/

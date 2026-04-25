@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Signals · India Quant{% endblock %}
+{% block content %}
+
+<div class="page-head">
+  <div>
+    <h1>Signals</h1>
+    <div class="desc">Per-ticker momentum, volatility, latest debate verdict.</div>
+  </div>
+  <form action="/run/factors" method="post"><button class="btn primary" type="submit">Recompute factors</button></form>
+</div>
+
+<div class="card">
+  <div class="card-bd flush"><div class="table-wrap"><table class="x">
+    <thead><tr>
+      <th class="text-right">ML #</th>
+      <th>Ticker</th><th class="text-right">Close</th><th class="text-right">Δ%</th>
+      <th class="text-right">ML pred 1d</th>
+      <th class="text-right">Mom 12-1</th><th class="text-right">Mom 3M</th><th class="text-right">Realized Vol</th>
+      <th>Verdict</th><th class="text-right">Conv.</th><th></th>
+    </tr></thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td class="text-right num text-3">{{ r.signal_rank if r.signal_rank is not none else '—' }}</td>
+        <td><a class="ticker-pill" href="/ticker/{{ r.ticker.replace('.NS','') }}">{{ r.ticker.replace('.NS','') }}</a></td>
+        <td class="text-right num">{{ r.close if r.close is not none else '—' }}</td>
+        <td class="text-right num {% if r.change_pct and r.change_pct >= 0 %}pos{% elif r.change_pct %}neg{% endif %}">
+          {{ '%+.2f' % r.change_pct + '%' if r.change_pct is not none else '—' }}
+        </td>
+        <td class="text-right num {% if r.predicted_return_1d and r.predicted_return_1d > 0.0015 %}pos{% endif %}">
+          {{ '%+.4f' % r.predicted_return_1d if r.predicted_return_1d is not none else '—' }}
+        </td>
+        <td class="text-right num">{{ r.momentum_12_1 if r.momentum_12_1 is not none else '—' }}</td>
+        <td class="text-right num">{{ r.momentum_3 if r.momentum_3 is not none else '—' }}</td>
+        <td class="text-right num">{{ r.realized_vol if r.realized_vol is not none else '—' }}</td>
+        <td>
+          {% if r.verdict == 'Bullish' %}<span class="badge bull">Bullish</span>
+          {% elif r.verdict == 'Bearish' %}<span class="badge bear">Bearish</span>
+          {% elif r.verdict == 'Mixed' %}<span class="badge mixed">Mixed</span>
+          {% elif r.verdict %}<span class="badge">{{ r.verdict }}</span>
+          {% else %}<span class="muted">—</span>{% endif %}
+        </td>
+        <td class="text-right num">{{ r.conviction if r.conviction is not none else '—' }}</td>
+        <td class="row-actions">
+          <form action="/run/debate" method="post">
+            <input type="hidden" name="ticker" value="{{ r.ticker.replace('.NS','') }}">
+            <button class="btn-link" type="submit">Run →</button>
+          </form>
+        </td>
+      </tr>
+      {% else %}<tr><td colspan="11" class="text-center muted">No price data yet — run the pipeline first.</td></tr>{% endfor %}
+    </tbody>
+  </table></div></div>
+</div>
+
+{% endblock %}

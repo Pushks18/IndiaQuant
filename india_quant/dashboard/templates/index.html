@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block title %}Overview · India Quant{% endblock %}
+{% block content %}
+
+<div class="page-head">
+  <div>
+    <h1>Overview</h1>
+    <div class="desc">Latest trading date in DB: <span class="num">{{ today }}</span></div>
+  </div>
+  <div class="flex gap-2">
+    <form action="/run/pipeline" method="post"><button class="btn ghost" type="submit">Run pipeline</button></form>
+    <form action="/run/factors" method="post"><button class="btn ghost" type="submit">Recompute factors</button></form>
+  </div>
+</div>
+
+<section class="grid grid-3 section">
+  <div class="card"><div class="card-bd">
+    <div class="stat">
+      <span class="lbl">NIFTY 50</span>
+      {% if macro.nifty %}
+        <span class="val">{{ macro.nifty.value }}</span>
+        <span class="sub {% if macro.nifty.change_pct >= 0 %}pos{% else %}neg{% endif %}">{{ '%+.2f' % macro.nifty.change_pct }}%</span>
+      {% else %}<span class="val muted">—</span>{% endif %}
+    </div>
+  </div></div>
+  <div class="card"><div class="card-bd">
+    <div class="stat">
+      <span class="lbl">India VIX</span>
+      {% if macro.vix %}
+        <span class="val">{{ macro.vix.value }}</span>
+        <span class="sub muted">
+          {% if macro.vix.value > 25 %}High-Vol regime warning
+          {% elif macro.vix.value > 20 %}Elevated vol
+          {% else %}Calm{% endif %}
+        </span>
+      {% else %}<span class="val muted">—</span>{% endif %}
+    </div>
+  </div></div>
+  <div class="card"><div class="card-bd">
+    <div class="stat">
+      <span class="lbl">USD / INR</span>
+      {% if macro.usdinr %}
+        <span class="val">{{ macro.usdinr.value }}</span>
+        <span class="sub {% if macro.usdinr.change_pct >= 0 %}neg{% else %}pos{% endif %}">{{ '%+.3f' % macro.usdinr.change_pct }}%</span>
+      {% else %}<span class="val muted">—</span>{% endif %}
+    </div>
+  </div></div>
+</section>
+
+<section class="grid grid-2 section">
+  <div class="card">
+    <div class="card-hd"><span class="title">Top advancers</span><span class="meta">last 2 days</span></div>
+    <div class="card-bd flush"><div class="table-wrap"><table class="x">
+      <thead><tr><th>Ticker</th><th class="text-right">Close</th><th class="text-right">Change</th></tr></thead>
+      <tbody>
+        {% for m in movers.advancers %}
+        <tr>
+          <td><a class="ticker-pill" href="/ticker/{{ m.ticker.replace('.NS','') }}">{{ m.ticker.replace('.NS','') }}</a></td>
+          <td class="text-right num">{{ m.close }}</td>
+          <td class="text-right num pos">{{ '%+.2f' % m.change_pct }}%</td>
+        </tr>
+        {% else %}<tr><td colspan="3" class="text-center muted">No price movement data yet.</td></tr>{% endfor %}
+      </tbody></table></div></div>
+  </div>
+  <div class="card">
+    <div class="card-hd"><span class="title">Top decliners</span><span class="meta">last 2 days</span></div>
+    <div class="card-bd flush"><div class="table-wrap"><table class="x">
+      <thead><tr><th>Ticker</th><th class="text-right">Close</th><th class="text-right">Change</th></tr></thead>
+      <tbody>
+        {% for m in movers.decliners %}
+        <tr>
+          <td><a class="ticker-pill" href="/ticker/{{ m.ticker.replace('.NS','') }}">{{ m.ticker.replace('.NS','') }}</a></td>
+          <td class="text-right num">{{ m.close }}</td>
+          <td class="text-right num neg">{{ '%+.2f' % m.change_pct }}%</td>
+        </tr>
+        {% else %}<tr><td colspan="3" class="text-center muted">No price movement data yet.</td></tr>{% endfor %}
+      </tbody></table></div></div>
+  </div>
+</section>
+
+<section class="card section">
+  <div class="card-hd"><span class="title">Pipeline data health</span><span class="meta">9 tables</span></div>
+  <div class="card-bd">
+    <div class="health-grid">
+    {% for k, v in health.items() %}
+      <div class="health-cell">
+        <span class="name">{{ k }}</span>
+        <span class="rows">{{ v.rows }} rows</span>
+        <span class="ts">last: {{ v.last or 'never' }}</span>
+      </div>
+    {% endfor %}
+    </div>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-hd"><span class="title">Universe ({{ tickers|length }} tickers)</span><span class="meta">click to drill in</span></div>
+  <div class="card-bd"><div class="pill-list">
+    {% for t in tickers %}<a class="ticker-pill" href="/ticker/{{ t.replace('.NS','') }}">{{ t.replace('.NS','') }}</a>{% endfor %}
+  </div></div>
+</section>
+
+{% endblock %}
