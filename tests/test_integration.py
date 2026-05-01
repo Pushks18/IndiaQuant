@@ -236,6 +236,14 @@ def test_regime_risk_on():
     assert regime == "RISK_ON"
 
 
+def test_ml_feature_cols_include_global():
+    from india_quant.signals.ml_models import ReturnPredictor
+    rp = ReturnPredictor()
+    global_cols = [c for c in rp.FEATURE_COLS if c.startswith("^") or c.startswith("CL") or c == "global_regime"]
+    assert len(global_cols) > 0
+    assert "global_regime" in rp.FEATURE_COLS
+
+
 def _gd_signal(ticker, pct_1d, price=100.0):
     from india_quant.signals.global_context import SignalRow
     return SignalRow(
