@@ -152,6 +152,21 @@ def test_telegram_notifier_disabled():
     assert result is False  # gracefully disabled
 
 
+# ── Global Context tests ──────────────────────────────────────────────────────
+
+def test_global_context_imports():
+    from india_quant.signals.global_context import (
+        GlobalContext, SignalRow, GROUPS, get_global_context
+    )
+    assert "US" in GROUPS
+    assert "Asia" in GROUPS
+    assert "FX" in GROUPS
+    assert "Commodities" in GROUPS
+    assert "Europe" in GROUPS
+    assert "^CNXIT" in GROUPS["Asia"]
+    assert "^NSEBANK" in GROUPS["Asia"]
+
+
 # ── Go-live checklist ─────────────────────────────────────────────────────────
 
 def print_go_live_checklist():
