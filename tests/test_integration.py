@@ -236,6 +236,14 @@ def test_regime_risk_on():
     assert regime == "RISK_ON"
 
 
+def test_pipeline_has_fetch_global_signals():
+    from india_quant.data.pipeline import DataPipeline
+    import inspect
+    assert hasattr(DataPipeline, "fetch_global_signals")
+    sig = inspect.signature(DataPipeline.fetch_global_signals)
+    assert "trade_date" in sig.parameters
+
+
 def test_global_signal_model_imports():
     from india_quant.data.models import GlobalSignal
     cols = {c.name for c in GlobalSignal.__table__.columns}

@@ -43,7 +43,55 @@ class DataPipeline:
         except Exception as e:
             logger.error(f"[Pipeline] News fetch failed: {e}")
 
+        # 4. Fetch and store global cross-market signals
+        try:
+            n = DataPipeline.fetch_global_signals(run_date)
+            logger.info(f"[Pipeline] GlobalSignals: {n} rows updated")
+        except Exception as e:
+            logger.error(f"[Pipeline] GlobalSignals fetch failed: {e}")
+
         logger.info(f"[Pipeline] Pre-market run complete for {run_date}")
+
+    @staticmethod
+    def fetch_global_signals(trade_date: str = None):
+        """Fetch global context and upsert all signal rows to global_signals table."""
+        from datetime import date as date_cls
+        from india_quant.signals.global_context import get_global_context
+        from india_quant.data.models import GlobalSignal
+        from india_quant.data.db import get_session
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+        if trade_date is None:
+            trade_date = date_cls.today().isoformat()
+
+        ctx = get_global_context()
+        trade_date_obj = date_cls.fromisoformat(trade_date)
+
+        with get_session() as session:
+            for sig in ctx.signals:
+                stmt = pg_insert(GlobalSignal).values(
+                    date=trade_date_obj,
+                    ticker=sig.ticker,
+                    label=sig.label,
+                    group=sig.group,
+                    pct_1d=sig.pct_1d,
+                    pct_5d=sig.pct_5d,
+                    corr_30d=sig.corr_30d,
+                    corr_90d=sig.corr_90d,
+                    regime=ctx.regime,
+                ).on_conflict_do_update(
+                    index_elements=["date", "ticker"],
+                    set_={
+                        "pct_1d":   sig.pct_1d,
+                        "pct_5d":   sig.pct_5d,
+                        "corr_30d": sig.corr_30d,
+                        "corr_90d": sig.corr_90d,
+                        "regime":   ctx.regime,
+                    },
+                )
+                session.execute(stmt)
+        logger.info(f"[Pipeline] GlobalSignals: {len(ctx.signals)} rows upserted for {trade_date}")
+        return len(ctx.signals)
 
     @staticmethod
     def run_intraday():
