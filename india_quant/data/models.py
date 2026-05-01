@@ -236,3 +236,24 @@ class VolatilityData(Base):
     heston_theta = Column(Float)
     heston_sigma = Column(Float)
     heston_rho = Column(Float)
+
+
+class GlobalSignal(Base):
+    __tablename__ = "global_signals"
+
+    id         = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    date       = Column(Date, nullable=False)
+    ticker     = Column(String(20), nullable=False)
+    label      = Column(String(50))
+    group      = Column(String(20))
+    pct_1d     = Column(Float)
+    pct_5d     = Column(Float)
+    corr_30d   = Column(Float)
+    corr_90d   = Column(Float)
+    regime     = Column(String(10))
+    created_at = Column(DateTime, server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("date", "ticker", name="uq_global_signal_date_ticker"),
+        Index("ix_global_signal_date", "date"),
+    )

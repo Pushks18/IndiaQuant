@@ -38,6 +38,16 @@ class ReturnPredictor:
         "iv_skew", "iv_spread", "vrp", "oi_flow",
         "profitability_roe", "gross_profitability",
         "value_bm", "earnings_yield",
+        # global context features (joined from global_signals table)
+        "global_regime",
+        "^GSPC_pct_1d",  "^GSPC_pct_5d",  "^GSPC_corr_30d",
+        "^IXIC_pct_1d",  "^IXIC_pct_5d",
+        "^N225_pct_1d",  "^N225_pct_5d",  "^N225_corr_30d",
+        "^HSI_pct_1d",   "^HSI_corr_30d",
+        "USDINR=X_pct_1d", "DX-Y.NYB_pct_1d",
+        "^VIX_pct_1d",   "^VIX_price",
+        "CL=F_pct_1d",   "CL=F_pct_5d",
+        "GC=F_pct_1d",
     ]
 
     def prepare_dataset(
@@ -73,6 +83,44 @@ class ReturnPredictor:
         if factors.empty or labels.empty:
             logger.warning("No data for dataset preparation.")
             return None, None, None, None
+
+        # Global signals pivot (one row per date, columns = ticker_metric)
+        with get_session() as session:
+            global_raw = pd.DataFrame(
+                session.execute(
+                    text("""
+                        SELECT date, ticker, pct_1d, pct_5d, corr_30d, corr_90d, regime
+                        FROM global_signals
+                        WHERE date BETWEEN :start AND :end
+                    """),
+                    {"start": start_date, "end": end_date},
+                ).fetchall()
+            )
+
+        if not global_raw.empty:
+            global_raw.columns = ["date", "ticker", "pct_1d", "pct_5d", "corr_30d", "corr_90d", "regime"]
+            pivot_vals = global_raw.pivot(
+                index="date", columns="ticker",
+                values=["pct_1d", "pct_5d", "corr_30d", "corr_90d"],
+            )
+            pivot_vals.columns = [f"{ticker}_{metric}" for metric, ticker in pivot_vals.columns]
+            pivot_vals = pivot_vals.reset_index()
+
+            vix_rows = global_raw[global_raw["ticker"] == "^VIX"][["date", "pct_1d"]].copy()
+            vix_rows = vix_rows.rename(columns={"pct_1d": "^VIX_price"})
+
+            regime_map = {"RISK_OFF": 0, "NEUTRAL": 1, "RISK_ON": 2}
+            regime_df = (
+                global_raw.groupby("date")["regime"]
+                .first()
+                .map(regime_map)
+                .reset_index()
+                .rename(columns={"regime": "global_regime"})
+            )
+
+            factors = factors.merge(pivot_vals, on="date", how="left")
+            factors = factors.merge(regime_df,  on="date", how="left")
+            factors = factors.merge(vix_rows,   on="date", how="left")
 
         merged = factors.merge(labels, on=["ticker", "date"], how="inner")
 

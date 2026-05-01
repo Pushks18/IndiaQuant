@@ -152,6 +152,254 @@ def test_telegram_notifier_disabled():
     assert result is False  # gracefully disabled
 
 
+# ── Global Context tests ──────────────────────────────────────────────────────
+
+def test_global_context_imports():
+    from india_quant.signals.global_context import (
+        GlobalContext, SignalRow, GROUPS, get_global_context
+    )
+    assert "US" in GROUPS
+    assert "Asia" in GROUPS
+    assert "FX" in GROUPS
+    assert "Commodities" in GROUPS
+    assert "Europe" in GROUPS
+    assert "^CNXIT" in GROUPS["Asia"]
+    assert "^NSEBANK" in GROUPS["Asia"]
+
+
+def test_signal_row_direction_bullish():
+    from india_quant.signals.global_context import _compute_direction
+    assert _compute_direction(pct_1d=1.2, corr_30d=0.65) == "bullish"
+
+
+def test_signal_row_direction_bearish():
+    from india_quant.signals.global_context import _compute_direction
+    assert _compute_direction(pct_1d=-0.8, corr_30d=0.65) == "bearish"
+
+
+def test_signal_row_direction_neutral_on_none():
+    from india_quant.signals.global_context import _compute_direction
+    assert _compute_direction(pct_1d=None, corr_30d=0.65) == "neutral"
+
+
+def test_compute_corr_returns_none_when_insufficient_data():
+    import pandas as pd
+    from india_quant.signals.global_context import _compute_corr
+    short = pd.Series([0.01, -0.02, 0.03])
+    nifty = pd.Series([0.01, -0.01, 0.02])
+    assert _compute_corr(short, nifty, window=30) is None
+
+
+def test_compute_corr_value():
+    import pandas as pd
+    import numpy as np
+    from india_quant.signals.global_context import _compute_corr
+    rng = np.random.default_rng(42)
+    n = 50
+    a = pd.Series(rng.normal(0, 1, n))
+    b = a + pd.Series(rng.normal(0, 0.1, n))
+    result = _compute_corr(a, b, window=30)
+    assert result is not None
+    assert 0.9 < result <= 1.0
+
+
+def _gc_make_signal(ticker: str, pct_1d: float, price: float = 100.0):
+    from india_quant.signals.global_context import SignalRow
+    return SignalRow(
+        ticker=ticker, label=ticker, group="TEST",
+        pct_1d=pct_1d, pct_5d=None, direction="neutral",
+        corr_30d=None, corr_90d=None, price=price, atr_5d=None,
+    )
+
+
+def test_regime_risk_off_high_vix():
+    from india_quant.signals.global_context import _classify_regime
+    signals = [
+        _gc_make_signal("^VIX",   pct_1d=18.0, price=25.0),
+        _gc_make_signal("^GSPC",  pct_1d=-1.5),
+        _gc_make_signal("DX-Y.NYB", pct_1d=0.5),
+        _gc_make_signal("USDINR=X", pct_1d=0.4),
+    ]
+    regime, drivers = _classify_regime(signals)
+    assert regime == "RISK_OFF"
+    assert any("VIX" in d for d in drivers)
+
+
+def test_regime_risk_on():
+    from india_quant.signals.global_context import _classify_regime
+    signals = [
+        _gc_make_signal("^VIX",    pct_1d=-5.0, price=12.0),
+        _gc_make_signal("^GSPC",   pct_1d=0.8),
+        _gc_make_signal("DX-Y.NYB", pct_1d=-0.2),
+    ]
+    regime, drivers = _classify_regime(signals)
+    assert regime == "RISK_ON"
+
+
+def test_global_route_exists():
+    from india_quant.dashboard.app import create_app
+    app = create_app()
+    rules = [r.rule for r in app.url_map.iter_rules()]
+    assert "/global" in rules
+
+
+def test_ml_feature_cols_include_global():
+    from india_quant.signals.ml_models import ReturnPredictor
+    rp = ReturnPredictor()
+    global_cols = [c for c in rp.FEATURE_COLS if c.startswith("^") or c.startswith("CL") or c == "global_regime"]
+    assert len(global_cols) > 0
+    assert "global_regime" in rp.FEATURE_COLS
+
+
+def _gd_signal(ticker, pct_1d, price=100.0):
+    from india_quant.signals.global_context import SignalRow
+    return SignalRow(
+        ticker=ticker, label=ticker, group="TEST",
+        pct_1d=pct_1d, pct_5d=None, direction="neutral",
+        corr_30d=None, corr_90d=None, price=price, atr_5d=None,
+    )
+
+
+def test_compute_global_delta_positive():
+    from india_quant.signals.screener import _compute_global_delta
+    signals = [
+        _gd_signal("^GSPC",    0.8),
+        _gd_signal("^N225",    0.6),
+        _gd_signal("USDINR=X", -0.3),
+        _gd_signal("DX-Y.NYB", -0.1),
+    ]
+    delta = _compute_global_delta(signals)
+    assert delta > 0
+    assert delta <= 10
+
+
+def test_compute_global_delta_negative():
+    from india_quant.signals.screener import _compute_global_delta
+    signals = [
+        _gd_signal("^GSPC",    -0.8),
+        _gd_signal("DX-Y.NYB",  0.5),
+        _gd_signal("CL=F",      2.5),
+    ]
+    delta = _compute_global_delta(signals)
+    assert delta < 0
+    assert delta >= -10
+
+
+def test_compute_global_delta_capped_at_ten():
+    from india_quant.signals.screener import _compute_global_delta
+    signals = [
+        _gd_signal("^GSPC",    2.0),
+        _gd_signal("^N225",    1.5),
+        _gd_signal("USDINR=X", -0.5),
+    ]
+    assert _compute_global_delta(signals) == 10
+
+
+def test_score_risk_off_halves_long_score():
+    from india_quant.signals.screener import _score
+    base_kwargs = dict(
+        nifty_chg=0.5, ema_stack="bullish", adx=30.0,
+        plus_di=25.0, minus_di=15.0, rsi=62.0, macd_hist=0.5,
+        rs_vs_nifty=2.0, prev_day_sig="above_high", sect_mom=1.5,
+        mom_5d=3.5, w52h_pct=-2.0, w52l_pct=20.0,
+        vol_surge=1.8, vwap=None, prev_close=1000.0,
+        regime="NEUTRAL",
+    )
+    sl_neutral, _ = _score(**base_kwargs, regime_global="NEUTRAL", global_delta=0)
+    sl_off, _ = _score(**base_kwargs, regime_global="RISK_OFF", global_delta=0)
+    assert sl_off < sl_neutral * 0.7
+
+
+def test_score_global_delta_applied_directionally():
+    from india_quant.signals.screener import _score
+    base = dict(
+        nifty_chg=-0.4, ema_stack="mixed", adx=None,
+        plus_di=None, minus_di=None, rsi=50.0, macd_hist=None,
+        rs_vs_nifty=0.0, prev_day_sig="inside", sect_mom=None,
+        mom_5d=None, w52h_pct=None, w52l_pct=None,
+        vol_surge=1.0, vwap=None, prev_close=1000.0,
+        regime="NEUTRAL", regime_global="NEUTRAL",
+    )
+    sl_0, ss_0 = _score(**base, global_delta=0)
+    sl_p, ss_p = _score(**base, global_delta=8)
+    assert sl_p > sl_0
+    assert ss_p < ss_0
+
+
+def test_pipeline_has_fetch_global_signals():
+    from india_quant.data.pipeline import DataPipeline
+    import inspect
+    assert hasattr(DataPipeline, "fetch_global_signals")
+    sig = inspect.signature(DataPipeline.fetch_global_signals)
+    assert "trade_date" in sig.parameters
+
+
+def test_global_signal_model_imports():
+    from india_quant.data.models import GlobalSignal
+    cols = {c.name for c in GlobalSignal.__table__.columns}
+    for expected in ("id", "date", "ticker", "label", "group",
+                     "pct_1d", "pct_5d", "corr_30d", "corr_90d", "regime"):
+        assert expected in cols, f"Missing column: {expected}"
+    constraints = {c.name for c in GlobalSignal.__table__.constraints}
+    assert any("global_signal" in (n or "") for n in constraints)
+
+
+def test_instrument_levels_long():
+    from india_quant.signals.global_context import SignalRow, instrument_levels
+    sig = SignalRow(
+        ticker="^GSPC", label="S&P 500", group="US",
+        pct_1d=1.0, pct_5d=2.0, direction="bullish",
+        corr_30d=0.7, corr_90d=0.65,
+        price=5800.0, atr_5d=60.0,
+    )
+    levels = instrument_levels(sig, usdinr=83.0, capital=200_000)
+    assert levels["side"] == "LONG"
+    assert levels["entry"] > sig.price
+    assert levels["stop"]  < levels["entry"]
+    assert levels["t1"]    > levels["entry"]
+    assert levels["t2"]    > levels["t1"]
+    assert levels["rr1"]   > 1.0
+    assert levels["margin_inr"] > 0
+    assert levels["max_loss_inr"] > 0
+
+
+def test_instrument_levels_short():
+    from india_quant.signals.global_context import SignalRow, instrument_levels
+    sig = SignalRow(
+        ticker="CL=F", label="Crude WTI", group="Commodities",
+        pct_1d=-1.5, pct_5d=-2.0, direction="bearish",
+        corr_30d=-0.3, corr_90d=-0.28,
+        price=78.0, atr_5d=1.5,
+    )
+    levels = instrument_levels(sig, usdinr=83.0, capital=200_000)
+    assert levels["side"] == "SHORT"
+    assert levels["entry"] < sig.price
+    assert levels["stop"]  > levels["entry"]
+    assert levels["t1"]    < levels["entry"]
+
+
+def test_instrument_levels_none_on_missing_atr():
+    from india_quant.signals.global_context import SignalRow, instrument_levels
+    sig = SignalRow(
+        ticker="^GSPC", label="S&P 500", group="US",
+        pct_1d=0.5, pct_5d=1.0, direction="bullish",
+        corr_30d=0.7, corr_90d=0.65,
+        price=5800.0, atr_5d=None,
+    )
+    assert instrument_levels(sig, usdinr=83.0, capital=200_000) == {}
+
+
+def test_regime_neutral_when_mixed():
+    from india_quant.signals.global_context import _classify_regime
+    signals = [
+        _gc_make_signal("^VIX",    pct_1d=0.0, price=17.0),
+        _gc_make_signal("^GSPC",   pct_1d=0.2),
+        _gc_make_signal("DX-Y.NYB", pct_1d=0.1),
+    ]
+    regime, _ = _classify_regime(signals)
+    assert regime == "NEUTRAL"
+
+
 # ── Go-live checklist ─────────────────────────────────────────────────────────
 
 def print_go_live_checklist():
