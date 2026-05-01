@@ -137,13 +137,34 @@ def _compute_direction(pct_1d: Optional[float], corr_30d: Optional[float]) -> st
     return "neutral"
 
 
+def _normalize_index(s: pd.Series) -> pd.Series:
+    """Strip tz and time-of-day so series from different yfinance calls align."""
+    if s.empty:
+        return s
+    idx = s.index
+    try:
+        if getattr(idx, "tz", None) is not None:
+            idx = idx.tz_localize(None)
+    except Exception:
+        pass
+    try:
+        idx = idx.normalize()
+    except Exception:
+        pass
+    out = s.copy()
+    out.index = idx
+    return out
+
+
 def _compute_corr(
     signal_returns: pd.Series,
     nifty_returns: pd.Series,
     window: int,
 ) -> Optional[float]:
     """Pearson correlation of last `window` aligned daily returns."""
-    aligned = pd.concat([signal_returns, nifty_returns], axis=1).dropna()
+    a = _normalize_index(signal_returns)
+    b = _normalize_index(nifty_returns)
+    aligned = pd.concat([a, b], axis=1).dropna()
     if len(aligned) < window:
         return None
     tail = aligned.tail(window)
