@@ -55,10 +55,32 @@ class YFinanceFetcher:
         "INDIGO.NS", "CONCOR.NS",
     ]
 
+    # Nifty Next 50 — the 50 names below the Nifty 50 by market-cap.
+    # Refresh from https://niftyindices.com/Methodology/Method_NIFTY_Equity_Indices.pdf
+    NIFTY_NEXT_50 = [
+        "ABB.NS", "ADANIENSOL.NS", "AMBUJACEM.NS", "BAJAJHLDNG.NS", "BANKBARODA.NS",
+        "BERGEPAINT.NS", "BOSCHLTD.NS", "CANBK.NS", "CHOLAFIN.NS", "COLPAL.NS",
+        "DABUR.NS", "DLF.NS", "DMART.NS", "GAIL.NS", "GODREJCP.NS",
+        "HAL.NS", "HAVELLS.NS", "HDFCAMC.NS", "HINDPETRO.NS", "ICICIGI.NS",
+        "ICICIPRULI.NS", "INDHOTEL.NS", "INDIGO.NS", "IOC.NS", "IRCTC.NS",
+        "JINDALSTEL.NS", "JSWENERGY.NS", "LICI.NS", "LODHA.NS", "LTIM.NS",
+        "MARICO.NS", "NAUKRI.NS", "PFC.NS", "PIDILITIND.NS", "PIIND.NS",
+        "PNB.NS", "RECLTD.NS", "SBICARD.NS", "SHRIRAMFIN.NS", "SIEMENS.NS",
+        "SRF.NS", "TATAELXSI.NS", "TATAPOWER.NS", "TORNTPHARM.NS", "TRENT.NS",
+        "TVSMOTOR.NS", "UNITDSPR.NS", "VBL.NS", "VEDL.NS", "ZYDUSLIFE.NS",
+    ]
+
     # Combined universe for intraday scanning
     @classmethod
     def universe(cls) -> list[str]:
         return list(dict.fromkeys(cls.NIFTY_50 + cls.NIFTY_ALPHA_50))
+
+    @classmethod
+    def broad_universe(cls) -> list[str]:
+        """Nifty 50 ∪ Alpha 50 ∪ Next 50 — ~130 unique liquid names across indices."""
+        return list(dict.fromkeys(
+            cls.NIFTY_50 + cls.NIFTY_ALPHA_50 + cls.NIFTY_NEXT_50
+        ))
 
     def fetch_daily(
         self, tickers: list[str], start_date: str, end_date: str
@@ -176,9 +198,14 @@ class YFinanceFetcher:
         return upserted
 
     def update_all(self) -> int:
-        """Fetch latest data for all NIFTY_50 tickers since last stored date."""
+        """Fetch latest daily bars for the broad universe (Nifty 50 ∪ Alpha 50 ∪ Next 50).
+
+        Uses MAX(datetime) over price_data as the start so existing tickers only fill
+        the gap. Newly added tickers (no prior rows) backfill from 2018-01-01."""
         from india_quant.data.db import get_session
         from sqlalchemy import text
+
+        tickers = self.broad_universe()
 
         with get_session() as session:
             result = session.execute(
@@ -191,8 +218,8 @@ class YFinanceFetcher:
             start = "2018-01-01"
 
         end = date.today().isoformat()
-        logger.info(f"Updating all NIFTY_50 from {start} to {end}")
-        return self.fetch_and_store(self.NIFTY_50, start, end, interval="1d")
+        logger.info(f"Updating broad universe ({len(tickers)} tickers) from {start} to {end}")
+        return self.fetch_and_store(tickers, start, end, interval="1d")
 
 
 if __name__ == "__main__":

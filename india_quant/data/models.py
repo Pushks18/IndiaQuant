@@ -175,6 +175,54 @@ class TradeProposal(Base):
     created_at = Column(DateTime(timezone=True), default=func.now())
 
 
+class IntradayPrediction(Base):
+    """Persisted screener pick + intraday outcome tracking.
+
+    One row per (date, ticker, bias). Status progresses through the day:
+    PENDING → TRIGGERED → TARGET1 / TARGET2 / STOPPED.
+    """
+    __tablename__ = "intraday_prediction"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    date = Column(Date, nullable=False, index=True)
+    ticker = Column(String(20), nullable=False, index=True)
+    bias = Column(String(8), nullable=False)               # LONG / SHORT
+    score = Column(Float)
+    score_long = Column(Float)
+    score_short = Column(Float)
+    prev_close = Column(Float)
+    atr = Column(Float)
+    atr_pct = Column(Float)
+    trigger = Column(Float, nullable=False)
+    stop = Column(Float, nullable=False)
+    target1 = Column(Float, nullable=False)
+    target2 = Column(Float, nullable=False)
+    qty = Column(Integer)
+    max_loss_inr = Column(Float)
+    profit1_inr = Column(Float)
+    profit2_inr = Column(Float)
+    verdict = Column(String(16))
+    conviction = Column(Integer)
+
+    status = Column(String(12), default="PENDING")          # PENDING/TRIGGERED/TARGET1/TARGET2/STOPPED
+    triggered_at = Column(DateTime(timezone=True))
+    exit_at = Column(DateTime(timezone=True))
+    exit_price = Column(Float)
+    exit_reason = Column(String(16))                        # TARGET1/TARGET2/STOPPED/EOD
+    max_favorable_pct = Column(Float)                       # peak unrealized gain (post-trigger)
+    max_adverse_pct = Column(Float)                         # worst unrealized loss (post-trigger)
+    realized_pnl_inr = Column(Float)
+    meta = Column(Text)                                     # JSON dump of full plan
+
+    created_at = Column(DateTime(timezone=True), default=func.now())
+    updated_at = Column(DateTime(timezone=True), default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("date", "ticker", "bias", name="uq_intraday_pred_day_tkr_side"),
+        Index("ix_intraday_pred_date", "date"),
+    )
+
+
 class VolatilityData(Base):
     __tablename__ = "volatility_data"
 

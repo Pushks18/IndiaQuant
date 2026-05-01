@@ -15,6 +15,7 @@
         <a class="nav-link {% if request.path == '/' %}active{% endif %}" href="/">Overview</a>
         <a class="nav-link {% if request.path.startswith('/signals') %}active{% endif %}" href="/signals">Signals</a>
         <a class="nav-link {% if request.path.startswith('/intraday') %}active{% endif %}" href="/intraday">Intraday</a>
+        <a class="nav-link {% if request.path.startswith('/live') %}active{% endif %}" href="/live">Live</a>
         <a class="nav-link {% if request.path.startswith('/debates') %}active{% endif %}" href="/debates">Debates</a>
         <a class="nav-link {% if request.path.startswith('/proposals') %}active{% endif %}" href="/proposals">Proposals</a>
       </nav>

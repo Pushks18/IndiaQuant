@@ -1,0 +1,207 @@
+{% extends "base.html" %}
+{% block title %}Live tracker · India Quant{% endblock %}
+
+{% block head %}
+<script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+<style>
+  .live-grid    { display: grid; grid-template-columns: repeat(auto-fill, minmax(440px, 1fr)); gap: 16px; }
+  .live-card    { background: var(--bg-1, #11151c); border: 1px solid var(--bd, #232a36); border-radius: 10px; overflow: hidden; }
+  .live-card-hd { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; border-bottom: 1px solid var(--bd, #232a36); }
+  .live-card-bd { padding: 0; }
+  .chart-host   { width: 100%; height: 280px; }
+  .live-meta    { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px 14px; font-size: 12px; padding: 10px 12px; border-top: 1px solid var(--bd, #232a36); }
+  .live-meta b  { color: #8aa1c4; font-weight: 500; }
+  .badge.pending  { background: #3a3a3a; color: #ddd; }
+  .badge.trig     { background: #1f4d72; color: #cfe7ff; }
+  .badge.t1       { background: #2a6f3f; color: #d4ffe1; }
+  .badge.t2       { background: #1d8c4e; color: #fff; }
+  .badge.stop     { background: #7a2c2c; color: #ffd3d3; }
+  .summary-grid   { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; margin-bottom: 14px; }
+  .summary-tile   { background: var(--bg-1, #11151c); border: 1px solid var(--bd, #232a36); border-radius: 8px; padding: 10px 12px; }
+  .summary-tile .v { font-size: 22px; font-weight: 600; }
+  .summary-tile .k { font-size: 11px; color: #8aa1c4; text-transform: uppercase; letter-spacing: .04em; }
+  .pnl-pos { color: #6ad58a; }
+  .pnl-neg { color: #f1818a; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Live intraday tracker</h1>
+    <div class="desc">Pre-market picks plotted with trigger / stop / target lines · 5-min bars · auto-refresh 60s · {{ today }}</div>
+  </div>
+  <div class="flex gap-2 items-center">
+    <form method="post" action="/run/screener-live" class="flex gap-2 items-center">
+      <input class="input" type="number" name="capital" value="200000" min="10000" step="10000" style="width:120px" title="Capital ₹">
+      <input class="input" type="number" name="risk" value="1.0" min="0.1" max="5" step="0.1" style="width:70px" title="Risk %">
+      <input class="input" type="number" name="top" value="8" min="1" max="20" style="width:60px" title="Top N">
+      <label class="text-sm" style="display:flex; align-items:center; gap:4px;"><input type="checkbox" name="confirm"> intraday confirm</label>
+      <button class="btn primary" type="submit">Refresh picks</button>
+    </form>
+    <a class="btn" href="/live/accuracy">Accuracy →</a>
+  </div>
+</div>
+
+<div class="summary-grid" id="summary">
+  <div class="summary-tile"><div class="k">Picks</div>           <div class="v" id="s-n">—</div></div>
+  <div class="summary-tile"><div class="k">Triggered</div>       <div class="v" id="s-trig">—</div></div>
+  <div class="summary-tile"><div class="k">T1 hit</div>          <div class="v" id="s-t1">—</div></div>
+  <div class="summary-tile"><div class="k">T2 hit</div>          <div class="v" id="s-t2">—</div></div>
+  <div class="summary-tile"><div class="k">Stopped</div>         <div class="v" id="s-stop">—</div></div>
+  <div class="summary-tile"><div class="k">Net P&amp;L (₹)</div>  <div class="v" id="s-pnl">—</div></div>
+</div>
+
+{% if not preds %}
+<section class="card section">
+  <div class="card-bd" style="padding: 20px; text-align: center; color: #8aa1c4;">
+    No picks persisted for today. Click <b>Refresh picks</b> above to run the screener.
+  </div>
+</section>
+{% endif %}
+
+<div class="live-grid" id="live-grid"></div>
+
+<div class="text-2 mt-2" style="font-size:12px;">
+  Status legend:
+  <span class="badge pending">PENDING</span>
+  <span class="badge trig">TRIGGERED</span>
+  <span class="badge t1">TARGET1</span>
+  <span class="badge t2">TARGET2</span>
+  <span class="badge stop">STOPPED</span>
+  · auto-refresh every 60 s · single-bar tie-break is conservative (stop wins).
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const charts = {};   // ticker -> { chart, candleSeries, lines: [] }
+
+function badgeClass(status) {
+  if (status === "TRIGGERED") return "badge trig";
+  if (status === "TARGET1")   return "badge t1";
+  if (status === "TARGET2")   return "badge t2";
+  if (status === "STOPPED")   return "badge stop";
+  return "badge pending";
+}
+
+function fmt(n, d=2) {
+  if (n === null || n === undefined) return "—";
+  return Number(n).toLocaleString("en-IN", { maximumFractionDigits: d });
+}
+
+function ensureCard(item) {
+  const id = `card-${item.ticker.replace(".", "_")}`;
+  let card = document.getElementById(id);
+  if (card) return card;
+  card = document.createElement("div");
+  card.className = "live-card";
+  card.id = id;
+  card.innerHTML = `
+    <div class="live-card-hd">
+      <div>
+        <a class="ticker-pill" href="/ticker/${item.ticker.replace(".NS","")}">${item.ticker.replace(".NS","")}</a>
+        <span class="badge ${item.bias === 'LONG' ? 'bull' : 'bear'}">${item.bias}</span>
+        <span class="meta" style="margin-left:6px; font-size:12px; color:#8aa1c4;">score ${fmt(item.score, 0)}</span>
+      </div>
+      <span class="status ${badgeClass(item.outcome.status)}">${item.outcome.status}</span>
+    </div>
+    <div class="live-card-bd"><div class="chart-host" id="chart-${id}"></div></div>
+    <div class="live-meta">
+      <div><b>Trigger</b> <span class="num">${fmt(item.trigger)}</span></div>
+      <div><b>Stop</b> <span class="num">${fmt(item.stop)}</span></div>
+      <div><b>T1</b> <span class="num">${fmt(item.target1)}</span></div>
+      <div><b>T2</b> <span class="num">${fmt(item.target2)}</span></div>
+      <div><b>Qty</b> <span class="num">${item.qty || "—"}</span></div>
+      <div><b>MFE</b> <span class="num">${fmt(item.outcome.max_favorable_pct, 2)}%</span></div>
+      <div><b>MAE</b> <span class="num">${fmt(item.outcome.max_adverse_pct, 2)}%</span></div>
+      <div><b>P&amp;L</b> <span class="num ${(item.outcome.realized_pnl_inr || 0) >= 0 ? 'pnl-pos' : 'pnl-neg'}">${item.outcome.realized_pnl_inr === null ? "—" : "₹" + fmt(item.outcome.realized_pnl_inr, 0)}</span></div>
+    </div>
+  `;
+  document.getElementById("live-grid").appendChild(card);
+  return card;
+}
+
+function buildChart(item) {
+  const host = document.getElementById(`chart-card-${item.ticker.replace(".", "_")}`);
+  const chart = LightweightCharts.createChart(host, {
+    layout: { background: { color: "#11151c" }, textColor: "#cfd6e0" },
+    grid:   { vertLines: { color: "#1c2230" }, horzLines: { color: "#1c2230" } },
+    timeScale: { timeVisible: true, secondsVisible: false, borderColor: "#2a3140" },
+    rightPriceScale: { borderColor: "#2a3140" },
+    crosshair: { mode: 0 },
+    autoSize: true,
+  });
+  const candleSeries = chart.addCandlestickSeries({
+    upColor: "#26a69a", downColor: "#ef5350",
+    borderUpColor: "#26a69a", borderDownColor: "#ef5350",
+    wickUpColor: "#26a69a", wickDownColor: "#ef5350",
+  });
+  // Draw horizontal levels via priceLines
+  const lines = [
+    { price: item.trigger, color: "#3da0ff", title: "TRIG" },
+    { price: item.stop,    color: "#f1818a", title: "STOP" },
+    { price: item.target1, color: "#6ad58a", title: "T1"   },
+    { price: item.target2, color: "#26d978", title: "T2"   },
+  ];
+  lines.forEach(l => candleSeries.createPriceLine({
+    price: l.price, color: l.color, lineWidth: 1, lineStyle: 2,
+    axisLabelVisible: true, title: l.title,
+  }));
+  charts[item.ticker] = { chart, candleSeries };
+}
+
+function updateCard(item) {
+  ensureCard(item);
+  if (!charts[item.ticker]) buildChart(item);
+  const series = charts[item.ticker].candleSeries;
+  series.setData(item.bars.map(b => ({
+    time: b.time, open: b.open, high: b.high, low: b.low, close: b.close,
+  })));
+
+  const card = document.getElementById(`card-${item.ticker.replace(".", "_")}`);
+  const statusEl = card.querySelector(".status");
+  statusEl.className = `status ${badgeClass(item.outcome.status)}`;
+  statusEl.textContent = item.outcome.status;
+  // Refresh meta block (cheap rebuild)
+  const meta = card.querySelector(".live-meta");
+  meta.innerHTML = `
+    <div><b>Trigger</b> <span class="num">${fmt(item.trigger)}</span></div>
+    <div><b>Stop</b> <span class="num">${fmt(item.stop)}</span></div>
+    <div><b>T1</b> <span class="num">${fmt(item.target1)}</span></div>
+    <div><b>T2</b> <span class="num">${fmt(item.target2)}</span></div>
+    <div><b>Qty</b> <span class="num">${item.qty || "—"}</span></div>
+    <div><b>MFE</b> <span class="num">${fmt(item.outcome.max_favorable_pct, 2)}%</span></div>
+    <div><b>MAE</b> <span class="num">${fmt(item.outcome.max_adverse_pct, 2)}%</span></div>
+    <div><b>P&amp;L</b> <span class="num ${(item.outcome.realized_pnl_inr || 0) >= 0 ? 'pnl-pos' : 'pnl-neg'}">${item.outcome.realized_pnl_inr === null ? "—" : "₹" + fmt(item.outcome.realized_pnl_inr, 0)}</span></div>
+  `;
+}
+
+function updateSummary(s) {
+  document.getElementById("s-n").textContent    = s.n ?? 0;
+  document.getElementById("s-trig").textContent = (s.triggered ?? 0) + (s.n ? ` (${s.trigger_rate}%)` : "");
+  document.getElementById("s-t1").textContent   = s.t1_hits ?? 0;
+  document.getElementById("s-t2").textContent   = s.t2_hits ?? 0;
+  document.getElementById("s-stop").textContent = s.stopped ?? 0;
+  const pnl = s.net_pnl_inr ?? 0;
+  const pnlEl = document.getElementById("s-pnl");
+  pnlEl.textContent = (pnl >= 0 ? "+" : "−") + "₹" + fmt(Math.abs(pnl), 0);
+  pnlEl.className = "v " + (pnl >= 0 ? "pnl-pos" : "pnl-neg");
+}
+
+async function refresh() {
+  try {
+    const r = await fetch("/api/live/data", { cache: "no-store" });
+    const d = await r.json();
+    if (d.error) return;
+    (d.items || []).forEach(updateCard);
+    updateSummary(d.summary || {});
+  } catch (e) {
+    console.error("live refresh failed", e);
+  }
+}
+
+refresh();
+setInterval(refresh, 60_000);
+</script>
+{% endblock %}

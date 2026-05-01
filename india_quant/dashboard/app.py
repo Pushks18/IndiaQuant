@@ -5,7 +5,7 @@ Run:
   python main.py --dashboard                   # same, via main entrypoint
 """
 import threading
-from datetime import date
+from datetime import date, datetime
 
 from flask import Flask, jsonify, render_template, request, redirect, url_for
 from loguru import logger
@@ -48,33 +48,92 @@ def create_app() -> Flask:
 
     @app.route("/intraday")
     def intraday():
-        from india_quant.signals.intraday import todays_intraday_plan
-        try:
-            capital = float(request.args.get("capital", 100_000))
-        except ValueError:
-            capital = 100_000
-        try:
-            risk_pct = float(request.args.get("risk", 1.0)) / 100.0
-        except ValueError:
-            risk_pct = 0.01
-        try:
-            tgt_mult = float(request.args.get("target", 1.5))
-        except ValueError:
-            tgt_mult = 1.5
-        plans = todays_intraday_plan(
+        from india_quant.signals.screener import run_screener, TICKER_SECTOR
+        try:    capital = float(request.args.get("capital", 100_000))
+        except ValueError: capital = 100_000
+        try:    risk_pct = float(request.args.get("risk", 1.0)) / 100.0
+        except ValueError: risk_pct = 0.01
+        try:    tgt_mult = float(request.args.get("target", 1.5))
+        except ValueError: tgt_mult = 1.5
+        try:    top_n = int(request.args.get("top", 20))
+        except ValueError: top_n = 20
+
+        plans = run_screener(
             capital_inr=capital,
             risk_per_trade_pct=risk_pct,
-            top_n=15,
-            target_multiple=tgt_mult,
+            top_n=top_n,
+            t1_mult=tgt_mult,
+            t2_mult=tgt_mult + 1.3,
         )
+        actionable = [p for p in plans if p.get("bias") in ("LONG", "SHORT")]
         return render_template(
             "intraday.html",
-            plans=plans,
+            plans=actionable,
+            universe_size=len(TICKER_SECTOR),
             capital=capital,
             risk_pct=risk_pct * 100,
             target_multiple=tgt_mult,
+            top_n=top_n,
             today=ddata.latest_trading_date().isoformat(),
         )
+
+    @app.route("/live")
+    def live():
+        from india_quant.signals import live_tracker
+        return render_template(
+            "live.html",
+            today=datetime.now(live_tracker.IST).date().isoformat(),
+            preds=live_tracker.get_predictions(),
+        )
+
+    @app.route("/api/live/data")
+    def api_live_data():
+        from india_quant.signals import live_tracker
+        try:
+            return jsonify(live_tracker.live_state(include_bars=True))
+        except Exception as e:
+            logger.error(f"live_state failed: {e}")
+            return jsonify({"error": str(e), "items": [], "summary": {"n": 0}}), 500
+
+    @app.route("/live/accuracy")
+    def live_accuracy():
+        from india_quant.signals import live_tracker
+        from datetime import date as _date, timedelta as _td
+        try:
+            days = int(request.args.get("days", 30))
+        except ValueError:
+            days = 30
+        end = _date.today()
+        start = end - _td(days=days)
+        return render_template(
+            "live_accuracy.html",
+            data=live_tracker.accuracy_summary(start=start, end=end),
+            days=days,
+        )
+
+    @app.route("/run/screener-live", methods=["POST"])
+    def run_screener_live():
+        """Run the v4 screener and persist picks for today's tracker."""
+        from india_quant.signals.screener import run_screener
+        from india_quant.signals import live_tracker
+        try:
+            capital   = float(request.form.get("capital", 200_000))
+            risk      = float(request.form.get("risk", 1.0)) / 100.0
+            top_n     = int(request.form.get("top", 8))
+            live_mode = request.form.get("live") == "on"
+        except ValueError:
+            capital, risk, top_n, live_mode = 200_000, 0.01, 8, False
+        try:
+            plans = run_screener(
+                capital_inr=capital,
+                risk_per_trade_pct=risk,
+                top_n=top_n,
+                live_mode=live_mode,
+            )
+            live_tracker.persist_today_predictions(plans)
+        except Exception as e:
+            logger.error(f"run_screener_live failed: {e}")
+        return redirect(url_for("live"))
 
     @app.route("/debates")
     def debates():
