@@ -120,6 +120,160 @@ def get_global_context() -> GlobalContext:
     return result
 
 
+import pandas as pd
+import yfinance as yf
+
+
+# ─── Helpers ──────────────────────────────────────────────────────────────────
+
+def _compute_direction(pct_1d: Optional[float], corr_30d: Optional[float]) -> str:
+    if pct_1d is None or corr_30d is None:
+        return "neutral"
+    product = pct_1d * corr_30d
+    if product > 0:
+        return "bullish"
+    if product < 0:
+        return "bearish"
+    return "neutral"
+
+
+def _compute_corr(
+    signal_returns: pd.Series,
+    nifty_returns: pd.Series,
+    window: int,
+) -> Optional[float]:
+    """Pearson correlation of last `window` aligned daily returns."""
+    aligned = pd.concat([signal_returns, nifty_returns], axis=1).dropna()
+    if len(aligned) < window:
+        return None
+    tail = aligned.tail(window)
+    val = float(tail.iloc[:, 0].corr(tail.iloc[:, 1]))
+    return round(val, 3) if not pd.isna(val) else None
+
+
+def _compute_atr(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 5) -> Optional[float]:
+    """Simple ATR over `period` bars."""
+    try:
+        trs = []
+        for i in range(1, len(close)):
+            tr = max(
+                float(high.iloc[i]) - float(low.iloc[i]),
+                abs(float(high.iloc[i]) - float(close.iloc[i - 1])),
+                abs(float(low.iloc[i]) - float(close.iloc[i - 1])),
+            )
+            trs.append(tr)
+        if len(trs) < period:
+            return None
+        return round(sum(trs[-period:]) / period, 4)
+    except Exception:
+        return None
+
+
+def _fetch_nifty_returns() -> tuple[pd.Series, Optional[float], Optional[float]]:
+    """Returns (daily_returns, pct_1d, pct_5d) for ^NSEI."""
+    df = yf.Ticker("^NSEI").history(period="100d")
+    close = df["Close"].dropna()
+    returns = close.pct_change().dropna()
+    pct_1d = round(float(returns.iloc[-1]) * 100, 3) if len(returns) >= 1 else None
+    pct_5d = round((float(close.iloc[-1]) / float(close.iloc[-6]) - 1) * 100, 3) if len(close) >= 6 else None
+    return returns, pct_1d, pct_5d
+
+
+def _fetch_group(
+    ticker_map: dict[str, str],
+    group: str,
+    nifty_returns: pd.Series,
+) -> list[SignalRow]:
+    """Download 90d OHLCV for all tickers in a group, compute per-ticker metrics."""
+    tickers = list(ticker_map.keys())
+    df = yf.download(tickers, period="90d", auto_adjust=True, progress=False, threads=True)
+    if df.empty:
+        return []
+
+    rows: list[SignalRow] = []
+    multi = isinstance(df.columns, pd.MultiIndex)
+
+    for ticker, label in ticker_map.items():
+        try:
+            if multi:
+                close = df["Close"][ticker].dropna()
+                high  = df["High"][ticker].dropna()
+                low   = df["Low"][ticker].dropna()
+            else:
+                close = df["Close"].dropna()
+                high  = df["High"].dropna()
+                low   = df["Low"].dropna()
+
+            if len(close) < 6:
+                continue
+
+            returns = close.pct_change().dropna()
+            pct_1d  = round(float(returns.iloc[-1]) * 100, 3)
+            pct_5d  = round((float(close.iloc[-1]) / float(close.iloc[-6]) - 1) * 100, 3)
+            price   = round(float(close.iloc[-1]), 4)
+            atr_5d  = _compute_atr(high, low, close, period=5)
+
+            corr_30d = _compute_corr(returns, nifty_returns, 30)
+            corr_90d = _compute_corr(returns, nifty_returns, 90)
+            direction = _compute_direction(pct_1d, corr_30d)
+
+            rows.append(SignalRow(
+                ticker=ticker, label=label, group=group,
+                pct_1d=pct_1d, pct_5d=pct_5d,
+                direction=direction,
+                corr_30d=corr_30d, corr_90d=corr_90d,
+                price=price, atr_5d=atr_5d,
+            ))
+        except Exception:
+            continue
+
+    return rows
+
+
+def _fetch_usdinr(signals: list[SignalRow]) -> float:
+    for s in signals:
+        if s.ticker == "USDINR=X" and s.price:
+            return s.price
+    return 83.0
+
+
 def _fetch_all() -> GlobalContext:
-    """Stub - implemented in Task 2."""
-    raise NotImplementedError("Implemented in Task 2")
+    """Fetch all groups, classify regime, return GlobalContext."""
+    try:
+        nifty_returns, nifty_pct_1d, nifty_pct_5d = _fetch_nifty_returns()
+    except Exception:
+        nifty_returns = pd.Series(dtype=float)
+        nifty_pct_1d = nifty_pct_5d = None
+
+    all_signals: list[SignalRow] = []
+    for group_name, ticker_map in GROUPS.items():
+        try:
+            rows = _fetch_group(ticker_map, group_name, nifty_returns)
+            all_signals.extend(rows)
+        except Exception:
+            pass
+
+    regime, drivers = _classify_regime(all_signals)
+    bias_text = _bias_text(regime)
+    usdinr = _fetch_usdinr(all_signals)
+
+    return GlobalContext(
+        fetched_at=datetime.now(IST),
+        regime=regime,
+        regime_drivers=drivers,
+        signals=all_signals,
+        nifty_bias_text=bias_text,
+        nifty_pct_1d=nifty_pct_1d,
+        nifty_pct_5d=nifty_pct_5d,
+        usdinr=usdinr,
+    )
+
+
+# ─── Regime classification (stubs filled in Task 3) ───────────────────────────
+
+def _classify_regime(signals: list[SignalRow]) -> tuple[str, list[str]]:
+    return "NEUTRAL", []
+
+
+def _bias_text(regime: str) -> str:
+    return ""

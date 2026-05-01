@@ -167,6 +167,42 @@ def test_global_context_imports():
     assert "^NSEBANK" in GROUPS["Asia"]
 
 
+def test_signal_row_direction_bullish():
+    from india_quant.signals.global_context import _compute_direction
+    assert _compute_direction(pct_1d=1.2, corr_30d=0.65) == "bullish"
+
+
+def test_signal_row_direction_bearish():
+    from india_quant.signals.global_context import _compute_direction
+    assert _compute_direction(pct_1d=-0.8, corr_30d=0.65) == "bearish"
+
+
+def test_signal_row_direction_neutral_on_none():
+    from india_quant.signals.global_context import _compute_direction
+    assert _compute_direction(pct_1d=None, corr_30d=0.65) == "neutral"
+
+
+def test_compute_corr_returns_none_when_insufficient_data():
+    import pandas as pd
+    from india_quant.signals.global_context import _compute_corr
+    short = pd.Series([0.01, -0.02, 0.03])
+    nifty = pd.Series([0.01, -0.01, 0.02])
+    assert _compute_corr(short, nifty, window=30) is None
+
+
+def test_compute_corr_value():
+    import pandas as pd
+    import numpy as np
+    from india_quant.signals.global_context import _compute_corr
+    rng = np.random.default_rng(42)
+    n = 50
+    a = pd.Series(rng.normal(0, 1, n))
+    b = a + pd.Series(rng.normal(0, 0.1, n))
+    result = _compute_corr(a, b, window=30)
+    assert result is not None
+    assert 0.9 < result <= 1.0
+
+
 # ── Go-live checklist ─────────────────────────────────────────────────────────
 
 def print_go_live_checklist():
