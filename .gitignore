@@ -20,3 +20,4 @@ models/*.pkl
 .DS_Store
 *.swp
 .vscode/
+.worktrees/
