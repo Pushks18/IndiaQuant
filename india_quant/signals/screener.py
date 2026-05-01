@@ -546,6 +546,56 @@ def _get_market_context() -> dict:
     return ctx
 
 
+def _market_ctx_from_global(gctx) -> dict:
+    """Convert GlobalContext to ctx dict shape used by _build_plan."""
+    from india_quant.signals.global_context import SECTOR_ETF_MAP
+    by_ticker = {s.ticker: s for s in gctx.signals}
+
+    vix_sig = by_ticker.get("^VIX")
+    vix     = vix_sig.price if vix_sig else None
+
+    sector_returns: dict[str, float] = {}
+    for etf_ticker, sector_name in SECTOR_ETF_MAP.items():
+        sig = by_ticker.get(etf_ticker)
+        if sig and sig.pct_1d is not None:
+            sector_returns[sector_name] = sig.pct_1d
+
+    return {
+        "vix":                vix,
+        "nifty_prev_chg_pct": gctx.nifty_pct_1d or 0.0,
+        "nifty_5d_return":    gctx.nifty_pct_5d or 0.0,
+        "sector_returns":     sector_returns,
+    }
+
+
+def _compute_global_delta(signals: list) -> int:
+    """Additive score delta from global signals. Range: [-10, +10]."""
+    by_ticker = {s.ticker: s for s in signals}
+
+    sp_1d   = (by_ticker["^GSPC"].pct_1d    if "^GSPC"    in by_ticker else None)
+    nk_1d   = (by_ticker["^N225"].pct_1d    if "^N225"    in by_ticker else None)
+    inr_1d  = (by_ticker["USDINR=X"].pct_1d if "USDINR=X" in by_ticker else None)
+    dxy_1d  = (by_ticker["DX-Y.NYB"].pct_1d if "DX-Y.NYB" in by_ticker else None)
+    cl_1d   = (by_ticker["CL=F"].pct_1d     if "CL=F"     in by_ticker else None)
+    vix_p   = (by_ticker["^VIX"].price      if "^VIX"     in by_ticker else None)
+
+    delta = 0
+    if sp_1d is not None and sp_1d > 0.5 and (dxy_1d is None or dxy_1d < 0):
+        delta += 6
+    if nk_1d is not None and nk_1d > 0.5:
+        delta += 4
+    if inr_1d is not None and inr_1d < -0.2:
+        delta += 3
+    if (sp_1d is not None and sp_1d < -0.5) or (vix_p is not None and vix_p > 20):
+        delta -= 6
+    if dxy_1d is not None and dxy_1d > 0.3:
+        delta -= 4
+    if cl_1d is not None and cl_1d > 2.0:
+        delta -= 3
+
+    return max(-10, min(10, delta))
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # SCORING ENGINE  (0–100 points, independent LONG and SHORT scores)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -568,6 +618,8 @@ def _score(
     vwap:           Optional[float],
     prev_close:     float,
     regime:         str,
+    regime_global:  str = "NEUTRAL",
+    global_delta:   int = 0,
 ) -> tuple[float, float]:
     """
     Compute LONG and SHORT scores independently.
@@ -679,6 +731,18 @@ def _score(
         if prev_close > vwap:  sl = min(100, sl + 3)
         else:                  ss = min(100, ss + 3)
 
+    # ── Layer 1: Regime multiplier (extreme events) ──────────────────────
+    if regime_global == "RISK_OFF":
+        sl = round(sl * 0.5, 1)
+        ss = round(ss * 1.2, 1)
+    elif regime_global == "RISK_ON":
+        sl = round(sl * 1.1, 1)
+        ss = round(ss * 0.8, 1)
+
+    # ── Layer 2: Global delta (additive, directional) ────────────────────
+    sl = round(min(100, max(0, sl + global_delta)), 1)
+    ss = round(min(100, max(0, ss - global_delta)), 1)
+
     return round(max(sl, 0), 1), round(max(ss, 0), 1)
 
 
@@ -749,6 +813,8 @@ def _build_plan(
     t1_mult:      float,
     t2_mult:      float,
     live_mode:    bool,
+    global_delta: int = 0,
+    regime_global: str = "NEUTRAL",
 ) -> Optional[TradePlan]:
 
     if len(bars) < ADX_PERIOD * 2 + 10:
@@ -816,6 +882,7 @@ def _build_plan(
         nifty_chg, stk, adx, pdi, ndi, rsi_val, macd_h,
         rs, pd_sig, sect_mom, mom5, w52hp, w52lp,
         vol_surge, vwap, prev_close, regime,
+        regime_global=regime_global, global_delta=global_delta,
     )
 
     if sl >= ss and sl >= MIN_SCORE:
@@ -892,13 +959,33 @@ def run_screener(
     print(_col("  NSE INTRADAY SCREENER v4  |  Fetching market context...", "CYAN"))
     print(_col("=" * 72, "CYAN"))
 
-    ctx = _get_market_context()
+    from india_quant.signals.global_context import get_global_context
+    try:
+        _gctx        = get_global_context()
+        ctx          = _market_ctx_from_global(_gctx)
+        global_delta = _compute_global_delta(_gctx.signals)
+        regime_g     = _gctx.regime
+    except Exception:
+        ctx          = _get_market_context()
+        global_delta = 0
+        regime_g     = "NEUTRAL"
+
     vix = ctx["vix"]
 
     if vix and vix > VIX_SKIP:
         msg = f"  VIX = {vix:.1f} > {VIX_SKIP} — SKIP ALL TRADES TODAY"
         print(_col(msg, "RED"))
         return [{"skip_day": True, "reason": msg, "vix": vix}]
+
+    # Hard block on extreme RISK_OFF
+    if (
+        regime_g == "RISK_OFF"
+        and (ctx.get("vix") or 0) > 25
+        and (ctx.get("nifty_prev_chg_pct") or 0) < -1.5
+    ):
+        msg = f"Global RISK_OFF extreme — VIX {ctx.get('vix'):.1f}, skip all trades"
+        print(_col(f"  ⛔  {msg}", "RED"))
+        return [{"skip_day": True, "reason": msg, "vix": ctx.get("vix")}]
 
     print(f"  VIX      : {_fmt_vix(vix)}")
     print(f"  Nifty Δ  : {_col_chg(ctx['nifty_prev_chg_pct'])}")
@@ -926,6 +1013,7 @@ def run_screener(
             plan = _build_plan(
                 ticker, bars, ctx, capital_inr,
                 risk_per_trade_pct, t1_mult, t2_mult, live_mode,
+                global_delta=global_delta, regime_global=regime_g,
             )
             if plan:
                 plans.append(plan)

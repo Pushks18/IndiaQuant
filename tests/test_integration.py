@@ -236,6 +236,81 @@ def test_regime_risk_on():
     assert regime == "RISK_ON"
 
 
+def _gd_signal(ticker, pct_1d, price=100.0):
+    from india_quant.signals.global_context import SignalRow
+    return SignalRow(
+        ticker=ticker, label=ticker, group="TEST",
+        pct_1d=pct_1d, pct_5d=None, direction="neutral",
+        corr_30d=None, corr_90d=None, price=price, atr_5d=None,
+    )
+
+
+def test_compute_global_delta_positive():
+    from india_quant.signals.screener import _compute_global_delta
+    signals = [
+        _gd_signal("^GSPC",    0.8),
+        _gd_signal("^N225",    0.6),
+        _gd_signal("USDINR=X", -0.3),
+        _gd_signal("DX-Y.NYB", -0.1),
+    ]
+    delta = _compute_global_delta(signals)
+    assert delta > 0
+    assert delta <= 10
+
+
+def test_compute_global_delta_negative():
+    from india_quant.signals.screener import _compute_global_delta
+    signals = [
+        _gd_signal("^GSPC",    -0.8),
+        _gd_signal("DX-Y.NYB",  0.5),
+        _gd_signal("CL=F",      2.5),
+    ]
+    delta = _compute_global_delta(signals)
+    assert delta < 0
+    assert delta >= -10
+
+
+def test_compute_global_delta_capped_at_ten():
+    from india_quant.signals.screener import _compute_global_delta
+    signals = [
+        _gd_signal("^GSPC",    2.0),
+        _gd_signal("^N225",    1.5),
+        _gd_signal("USDINR=X", -0.5),
+    ]
+    assert _compute_global_delta(signals) == 10
+
+
+def test_score_risk_off_halves_long_score():
+    from india_quant.signals.screener import _score
+    base_kwargs = dict(
+        nifty_chg=0.5, ema_stack="bullish", adx=30.0,
+        plus_di=25.0, minus_di=15.0, rsi=62.0, macd_hist=0.5,
+        rs_vs_nifty=2.0, prev_day_sig="above_high", sect_mom=1.5,
+        mom_5d=3.5, w52h_pct=-2.0, w52l_pct=20.0,
+        vol_surge=1.8, vwap=None, prev_close=1000.0,
+        regime="NEUTRAL",
+    )
+    sl_neutral, _ = _score(**base_kwargs, regime_global="NEUTRAL", global_delta=0)
+    sl_off, _ = _score(**base_kwargs, regime_global="RISK_OFF", global_delta=0)
+    assert sl_off < sl_neutral * 0.7
+
+
+def test_score_global_delta_applied_directionally():
+    from india_quant.signals.screener import _score
+    base = dict(
+        nifty_chg=-0.4, ema_stack="mixed", adx=None,
+        plus_di=None, minus_di=None, rsi=50.0, macd_hist=None,
+        rs_vs_nifty=0.0, prev_day_sig="inside", sect_mom=None,
+        mom_5d=None, w52h_pct=None, w52l_pct=None,
+        vol_surge=1.0, vwap=None, prev_close=1000.0,
+        regime="NEUTRAL", regime_global="NEUTRAL",
+    )
+    sl_0, ss_0 = _score(**base, global_delta=0)
+    sl_p, ss_p = _score(**base, global_delta=8)
+    assert sl_p > sl_0
+    assert ss_p < ss_0
+
+
 def test_pipeline_has_fetch_global_signals():
     from india_quant.data.pipeline import DataPipeline
     import inspect
