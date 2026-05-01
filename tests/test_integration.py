@@ -236,6 +236,13 @@ def test_regime_risk_on():
     assert regime == "RISK_ON"
 
 
+def test_global_route_exists():
+    from india_quant.dashboard.app import create_app
+    app = create_app()
+    rules = [r.rule for r in app.url_map.iter_rules()]
+    assert "/global" in rules
+
+
 def test_ml_feature_cols_include_global():
     from india_quant.signals.ml_models import ReturnPredictor
     rp = ReturnPredictor()

@@ -76,6 +76,48 @@ def create_app() -> Flask:
             today=ddata.latest_trading_date().isoformat(),
         )
 
+    @app.route("/global")
+    def global_context_page():
+        from india_quant.signals.global_context import get_global_context, instrument_levels
+        from india_quant.signals.screener import run_screener
+
+        try:    capital  = float(request.args.get("capital", 200_000))
+        except ValueError: capital = 200_000
+        try:    risk_pct = float(request.args.get("risk", 1.0)) / 100.0
+        except ValueError: risk_pct = 0.01
+        try:    top_n    = int(request.args.get("top", 10))
+        except ValueError: top_n = 10
+
+        ctx = get_global_context()
+
+        signal_levels = {}
+        for sig in ctx.signals:
+            lvl = instrument_levels(sig, usdinr=ctx.usdinr, capital=capital, risk_pct=risk_pct)
+            if lvl:
+                signal_levels[sig.ticker] = lvl
+
+        plans = run_screener(capital_inr=capital, risk_per_trade_pct=risk_pct, top_n=top_n)
+        actionable = []
+        for p in plans:
+            if p.get("bias") not in ("LONG", "SHORT"):
+                continue
+            if   ctx.regime == "RISK_ON"  and p["bias"] == "LONG":  p["global_aligned"] = True
+            elif ctx.regime == "RISK_OFF" and p["bias"] == "SHORT": p["global_aligned"] = True
+            elif ctx.regime == "NEUTRAL":                           p["global_aligned"] = True
+            else:                                                   p["global_aligned"] = False
+            actionable.append(p)
+
+        return render_template(
+            "global_context.html",
+            ctx=ctx,
+            signal_levels=signal_levels,
+            plans=actionable,
+            capital=capital,
+            risk_pct=risk_pct * 100,
+            top_n=top_n,
+            today=ddata.latest_trading_date().isoformat(),
+        )
+
     @app.route("/debates")
     def debates():
         rows = ddata.latest_debate(limit=50)
