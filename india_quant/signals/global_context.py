@@ -269,11 +269,73 @@ def _fetch_all() -> GlobalContext:
     )
 
 
-# ─── Regime classification (stubs filled in Task 3) ───────────────────────────
+# ─── Regime classification ────────────────────────────────────────────────────
 
-def _classify_regime(signals: list[SignalRow]) -> tuple[str, list[str]]:
-    return "NEUTRAL", []
+_BIAS_TEXT = {
+    "RISK_OFF": (
+        "Global markets bearish overnight. Nifty likely to open weak. "
+        "Favour short setups; reduce long position sizes."
+    ),
+    "RISK_ON": (
+        "Global markets bullish overnight. Nifty likely to open strong. "
+        "Long setups favoured; standard position sizes apply."
+    ),
+    "NEUTRAL": (
+        "Mixed global signals. No strong directional bias today. "
+        "Trade individual setups on their own merit."
+    ),
+}
 
 
 def _bias_text(regime: str) -> str:
-    return ""
+    return _BIAS_TEXT.get(regime, _BIAS_TEXT["NEUTRAL"])
+
+
+def _classify_regime(signals: list[SignalRow]) -> tuple[str, list[str]]:
+    """
+    RISK_OFF: VIX > 22  OR  (S&P < -1.0% AND DXY > +0.3% AND INR > +0.3%)
+    RISK_ON:  VIX < 15  AND  S&P > +0.5%  AND  DXY <= 0
+    NEUTRAL:  everything else
+    """
+    by_ticker = {s.ticker: s for s in signals}
+
+    vix_sig = by_ticker.get("^VIX")
+    sp_sig  = by_ticker.get("^GSPC")
+    dxy_sig = by_ticker.get("DX-Y.NYB")
+    inr_sig = by_ticker.get("USDINR=X")
+
+    vix_price = vix_sig.price  if vix_sig else None
+    sp_1d     = sp_sig.pct_1d  if sp_sig  else None
+    dxy_1d    = dxy_sig.pct_1d if dxy_sig else None
+    inr_1d    = inr_sig.pct_1d if inr_sig else None
+
+    if vix_price is not None and vix_price > 22:
+        return "RISK_OFF", [f"VIX {vix_price:.1f}"]
+
+    if (
+        sp_1d  is not None and sp_1d  < -1.0 and
+        dxy_1d is not None and dxy_1d >  0.3 and
+        inr_1d is not None and inr_1d >  0.3
+    ):
+        return "RISK_OFF", [
+            f"S&P {sp_1d:+.1f}%",
+            f"DXY {dxy_1d:+.1f}%",
+            f"INR {inr_1d:+.1f}%",
+        ]
+
+    if (
+        vix_price is not None and vix_price < 15 and
+        sp_1d     is not None and sp_1d     >  0.5 and
+        dxy_1d    is not None and dxy_1d    <= 0.0
+    ):
+        return "RISK_ON", [
+            f"VIX {vix_price:.1f}",
+            f"S&P {sp_1d:+.1f}%",
+            f"DXY {dxy_1d:+.1f}%",
+        ]
+
+    drivers = []
+    if sp_1d  is not None: drivers.append(f"S&P {sp_1d:+.1f}%")
+    if vix_price is not None: drivers.append(f"VIX {vix_price:.1f}")
+    if dxy_1d is not None: drivers.append(f"DXY {dxy_1d:+.1f}%")
+    return "NEUTRAL", drivers[:3]

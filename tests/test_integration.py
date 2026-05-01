@@ -203,6 +203,50 @@ def test_compute_corr_value():
     assert 0.9 < result <= 1.0
 
 
+def _gc_make_signal(ticker: str, pct_1d: float, price: float = 100.0):
+    from india_quant.signals.global_context import SignalRow
+    return SignalRow(
+        ticker=ticker, label=ticker, group="TEST",
+        pct_1d=pct_1d, pct_5d=None, direction="neutral",
+        corr_30d=None, corr_90d=None, price=price, atr_5d=None,
+    )
+
+
+def test_regime_risk_off_high_vix():
+    from india_quant.signals.global_context import _classify_regime
+    signals = [
+        _gc_make_signal("^VIX",   pct_1d=18.0, price=25.0),
+        _gc_make_signal("^GSPC",  pct_1d=-1.5),
+        _gc_make_signal("DX-Y.NYB", pct_1d=0.5),
+        _gc_make_signal("USDINR=X", pct_1d=0.4),
+    ]
+    regime, drivers = _classify_regime(signals)
+    assert regime == "RISK_OFF"
+    assert any("VIX" in d for d in drivers)
+
+
+def test_regime_risk_on():
+    from india_quant.signals.global_context import _classify_regime
+    signals = [
+        _gc_make_signal("^VIX",    pct_1d=-5.0, price=12.0),
+        _gc_make_signal("^GSPC",   pct_1d=0.8),
+        _gc_make_signal("DX-Y.NYB", pct_1d=-0.2),
+    ]
+    regime, drivers = _classify_regime(signals)
+    assert regime == "RISK_ON"
+
+
+def test_regime_neutral_when_mixed():
+    from india_quant.signals.global_context import _classify_regime
+    signals = [
+        _gc_make_signal("^VIX",    pct_1d=0.0, price=17.0),
+        _gc_make_signal("^GSPC",   pct_1d=0.2),
+        _gc_make_signal("DX-Y.NYB", pct_1d=0.1),
+    ]
+    regime, _ = _classify_regime(signals)
+    assert regime == "NEUTRAL"
+
+
 # ── Go-live checklist ─────────────────────────────────────────────────────────
 
 def print_go_live_checklist():
