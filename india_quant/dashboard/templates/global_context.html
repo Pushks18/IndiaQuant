@@ -1,0 +1,202 @@
+{% extends "base.html" %}
+{% block title %}Global Context · India Quant{% endblock %}
+{% block content %}
+
+<div class="page-head">
+  <div>
+    <h1>Global Market Context</h1>
+    <div class="desc">25 cross-market signals · rolling correlations vs Nifty · {{ today }}</div>
+  </div>
+  <form method="get" class="flex gap-2 items-center">
+    <label class="text-sm text-2">Capital ₹</label>
+    <input class="input" style="width:120px" type="number" name="capital" value="{{ capital|int }}" min="10000" step="10000">
+    <label class="text-sm text-2">Risk %</label>
+    <input class="input" style="width:70px"  type="number" name="risk"    value="{{ '%.1f' % risk_pct }}" min="0.1" max="5" step="0.1">
+    <label class="text-sm text-2">Top</label>
+    <input class="input" style="width:60px"  type="number" name="top"     value="{{ top_n }}" min="1" max="20">
+    <button class="btn primary" type="submit">Refresh</button>
+  </form>
+</div>
+
+{# ── Section 1: Day Bias Card ────────────────────────────────────────────── #}
+<section class="card section">
+  <div class="card-hd"><span class="title">Today's Global Bias</span>
+    <span class="meta">fetched {{ ctx.fetched_at.strftime('%H:%M IST') }}</span>
+  </div>
+  <div class="card-bd" style="display:flex; gap:2rem; align-items:flex-start; flex-wrap:wrap">
+    <div>
+      {% if ctx.regime == 'RISK_ON' %}
+        <span class="badge bull" style="font-size:1.4rem; padding:8px 20px">RISK-ON</span>
+      {% elif ctx.regime == 'RISK_OFF' %}
+        <span class="badge bear" style="font-size:1.4rem; padding:8px 20px">RISK-OFF</span>
+      {% else %}
+        <span class="badge" style="font-size:1.4rem; padding:8px 20px; background:#334155; color:#cbd5e1">NEUTRAL</span>
+      {% endif %}
+    </div>
+    <div>
+      <div class="muted" style="font-size:12px; margin-bottom:4px">KEY DRIVERS</div>
+      <ul style="margin:0; padding-left:16px; font-size:13px; line-height:1.8">
+        {% for d in ctx.regime_drivers %}<li>{{ d }}</li>{% endfor %}
+      </ul>
+    </div>
+    <div style="max-width:420px; font-size:13px; line-height:1.6; color:#94a3b8">
+      {{ ctx.nifty_bias_text }}
+    </div>
+  </div>
+</section>
+
+{# ── Section 2: Global Instrument Trade Levels ───────────────────────────── #}
+{% set groups_order = ["US", "Europe", "Asia", "FX", "Commodities"] %}
+{% for grp in groups_order %}
+  {% set grp_signals = ctx.signals | selectattr("group", "equalto", grp) | list %}
+  {% if grp_signals %}
+  <section class="card section">
+    <div class="card-hd"><span class="title">{{ grp }} Markets</span></div>
+    <div class="card-bd flush"><div class="table-wrap"><table class="x" style="font-size:12px">
+      <thead><tr>
+        <th>Signal</th>
+        <th class="text-right">Price</th>
+        <th class="text-right">1D %</th>
+        <th class="text-right">5D %</th>
+        <th class="text-right">Nifty Impact</th>
+        <th class="text-right">Corr 30d</th>
+        <th class="text-right">Corr 90d</th>
+        <th class="text-right">Side</th>
+        <th class="text-right">Entry</th>
+        <th class="text-right">Stop</th>
+        <th class="text-right">T1</th>
+        <th class="text-right">R:R</th>
+        <th class="text-right">Margin ₹</th>
+        <th class="text-right">Max Loss ₹</th>
+        <th class="text-right">T1 Profit ₹</th>
+      </tr></thead>
+      <tbody>
+      {% for sig in grp_signals %}
+        {% set lvl = signal_levels.get(sig.ticker, {}) %}
+        <tr>
+          <td><b>{{ sig.label }}</b><br><span class="muted" style="font-size:10px">{{ sig.ticker }}</span></td>
+          <td class="text-right num">{{ '%.2f'|format(sig.price) if sig.price else '—' }}</td>
+          <td class="text-right num {% if sig.pct_1d and sig.pct_1d > 0 %}pos{% elif sig.pct_1d %}neg{% endif %}">
+            {{ '%+.2f%%'|format(sig.pct_1d) if sig.pct_1d is not none else '—' }}
+          </td>
+          <td class="text-right num {% if sig.pct_5d and sig.pct_5d > 0 %}pos{% elif sig.pct_5d %}neg{% endif %}">
+            {{ '%+.2f%%'|format(sig.pct_5d) if sig.pct_5d is not none else '—' }}
+          </td>
+          <td class="text-right">
+            {% if sig.direction == 'bullish' %}<span class="badge bull">Bullish</span>
+            {% elif sig.direction == 'bearish' %}<span class="badge bear">Bearish</span>
+            {% else %}<span class="muted">—</span>{% endif %}
+          </td>
+          <td class="text-right num" style="{% if sig.corr_30d and sig.corr_30d|abs > 0.5 %}font-weight:bold{% endif %}">
+            {{ '%.2f'|format(sig.corr_30d) if sig.corr_30d is not none else '—' }}
+          </td>
+          <td class="text-right num">{{ '%.2f'|format(sig.corr_90d) if sig.corr_90d is not none else '—' }}</td>
+          {% if lvl %}
+            <td class="text-right">
+              {% if lvl.side == 'LONG' %}<span class="badge bull">Long</span>{% else %}<span class="badge bear">Short</span>{% endif %}
+            </td>
+            <td class="text-right num {% if lvl.side == 'LONG' %}pos{% else %}neg{% endif %}">{{ '%.2f'|format(lvl.entry) }}</td>
+            <td class="text-right num {% if lvl.side == 'LONG' %}neg{% else %}pos{% endif %}">{{ '%.2f'|format(lvl.stop) }}</td>
+            <td class="text-right num pos">{{ '%.2f'|format(lvl.t1) }}</td>
+            <td class="text-right num">{{ lvl.rr1 }}R</td>
+            <td class="text-right num">₹{{ '{:,.0f}'.format(lvl.margin_inr) }}</td>
+            <td class="text-right num neg">−₹{{ '{:,.0f}'.format(lvl.max_loss_inr) }}</td>
+            <td class="text-right num pos">+₹{{ '{:,.0f}'.format(lvl.profit1_inr) }}</td>
+          {% else %}
+            <td colspan="8" class="text-center muted" style="font-size:11px">Reference only</td>
+          {% endif %}
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table></div></div>
+  </section>
+  {% endif %}
+{% endfor %}
+
+{# ── Section 3: Nifty Stock Setups (Global Filtered) ─────────────────────── #}
+<section class="card section">
+  <div class="card-hd">
+    <span class="title">{{ plans|length }} Nifty setups · global-context filtered</span>
+    <span class="meta">✓ = bias aligns with regime · ⚠ = conflicts</span>
+  </div>
+  <div class="card-bd flush"><div class="table-wrap"><table class="x" style="font-size:12px">
+    <thead><tr>
+      <th>Ticker</th><th>Bias</th><th class="text-right">Score</th><th class="text-right">L/S</th>
+      <th class="text-right">Close</th><th class="text-right">ATR%</th>
+      <th class="text-right">RSI</th><th class="text-right">Regime</th>
+      <th class="text-right">Trigger</th><th class="text-right">Stop</th>
+      <th class="text-right">T1</th><th class="text-right">R:R</th>
+      <th class="text-right">Qty</th><th class="text-right">Margin</th>
+      <th class="text-right">Max Loss</th><th class="text-right">T1 Profit</th>
+      <th class="text-right">Global ✓</th>
+    </tr></thead>
+    <tbody>
+    {% for p in plans %}
+    <tr>
+      <td><a class="ticker-pill" href="/ticker/{{ p.ticker.replace('.NS','') }}">{{ p.ticker.replace('.NS','') }}</a></td>
+      <td>{% if p.bias == 'LONG' %}<span class="badge bull">long</span>{% else %}<span class="badge bear">short</span>{% endif %}</td>
+      <td class="text-right num">{{ '%.0f' % p.score }}</td>
+      <td class="text-right num" style="font-size:10px; color:#8aa1c4">{{ '%.0f' % p.score_long }}/{{ '%.0f' % p.score_short }}</td>
+      <td class="text-right num">{{ p.prev_close }}</td>
+      <td class="text-right num">{{ p.atr_pct }}%</td>
+      <td class="text-right num">{{ '%.0f'|format(p.rsi) if p.rsi else '—' }}</td>
+      <td class="text-right num {% if p.regime == 'TRENDING' %}pos{% else %}muted{% endif %}">{{ p.regime[:5] if p.regime else '—' }}</td>
+      <td class="text-right num {% if p.bias == 'LONG' %}pos{% else %}neg{% endif %}">{{ p.trigger }}</td>
+      <td class="text-right num {% if p.bias == 'LONG' %}neg{% else %}pos{% endif %}">{{ p.stop }}</td>
+      <td class="text-right num pos">{{ p.target1 }}</td>
+      <td class="text-right num">{{ p.rr1 }}</td>
+      <td class="text-right num">{{ p.qty }}</td>
+      <td class="text-right num">₹{{ '{:,.0f}'.format(p.margin_inr) }}</td>
+      <td class="text-right num neg">−₹{{ '{:,.0f}'.format(p.max_loss_inr) }}</td>
+      <td class="text-right num pos">+₹{{ '{:,.0f}'.format(p.profit1_inr) }}</td>
+      <td class="text-right">{% if p.global_aligned %}✓{% else %}<span class="warn">⚠</span>{% endif %}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="17" class="text-center muted">No setups passed today's screener.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div></div>
+</section>
+
+{# ── Section 4: Correlation Heatmap ──────────────────────────────────────── #}
+<section class="card section">
+  <div class="card-hd"><span class="title">Correlation heatmap — vs Nifty</span><span class="meta">sorted by |30d corr| · green = positive · red = negative</span></div>
+  <div class="card-bd flush"><div class="table-wrap">
+    <table class="x" style="font-size:12px">
+      <thead><tr><th>Signal</th><th>Ticker</th><th class="text-right">Group</th><th class="text-right" style="width:140px">Corr 30d</th><th class="text-right" style="width:140px">Corr 90d</th></tr></thead>
+      <tbody>
+      {% set sorted_signals = ctx.signals | sort(attribute='corr_30d', reverse=true) %}
+      {% for sig in sorted_signals %}
+        {% if sig.corr_30d is not none %}
+        <tr>
+          <td>{{ sig.label }}</td>
+          <td class="muted" style="font-size:10px">{{ sig.ticker }}</td>
+          <td class="text-right muted">{{ sig.group }}</td>
+          <td class="text-right">
+            {% set c = sig.corr_30d %}
+            {% set pct = ((c + 1) / 2 * 100)|int %}
+            <div style="background:linear-gradient(to right,
+              {% if c >= 0 %}#1e293b {{ (50 - pct//2)|int }}%, #22c55e {{ pct }}%{% else %}#ef4444 {{ (100 - pct)|int }}%, #1e293b {{ (50 + pct//2)|int }}%{% endif %}
+            ); padding:2px 8px; border-radius:3px; color:white; font-weight:bold">
+              {{ '%.3f'|format(c) }}
+            </div>
+          </td>
+          <td class="text-right">
+            {% set c = sig.corr_90d %}
+            {% if c is not none %}
+            <div style="background:linear-gradient(to right,
+              {% if c >= 0 %}#1e293b {{ (50 - ((c+1)/2*100)//2)|int }}%, #22c55e {{ ((c+1)/2*100)|int }}%{% else %}#ef4444 {{ (100 - ((c+1)/2*100))|int }}%, #1e293b {{ (50 + ((c+1)/2*100)//2)|int }}%{% endif %}
+            ); padding:2px 8px; border-radius:3px; color:white">
+              {{ '%.3f'|format(c) }}
+            </div>
+            {% else %}—{% endif %}
+          </td>
+        </tr>
+        {% endif %}
+      {% endfor %}
+      </tbody>
+    </table>
+  </div></div>
+</section>
+
+{% endblock %}
