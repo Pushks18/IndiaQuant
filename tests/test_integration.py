@@ -236,6 +236,51 @@ def test_regime_risk_on():
     assert regime == "RISK_ON"
 
 
+def test_instrument_levels_long():
+    from india_quant.signals.global_context import SignalRow, instrument_levels
+    sig = SignalRow(
+        ticker="^GSPC", label="S&P 500", group="US",
+        pct_1d=1.0, pct_5d=2.0, direction="bullish",
+        corr_30d=0.7, corr_90d=0.65,
+        price=5800.0, atr_5d=60.0,
+    )
+    levels = instrument_levels(sig, usdinr=83.0, capital=200_000)
+    assert levels["side"] == "LONG"
+    assert levels["entry"] > sig.price
+    assert levels["stop"]  < levels["entry"]
+    assert levels["t1"]    > levels["entry"]
+    assert levels["t2"]    > levels["t1"]
+    assert levels["rr1"]   > 1.0
+    assert levels["margin_inr"] > 0
+    assert levels["max_loss_inr"] > 0
+
+
+def test_instrument_levels_short():
+    from india_quant.signals.global_context import SignalRow, instrument_levels
+    sig = SignalRow(
+        ticker="CL=F", label="Crude WTI", group="Commodities",
+        pct_1d=-1.5, pct_5d=-2.0, direction="bearish",
+        corr_30d=-0.3, corr_90d=-0.28,
+        price=78.0, atr_5d=1.5,
+    )
+    levels = instrument_levels(sig, usdinr=83.0, capital=200_000)
+    assert levels["side"] == "SHORT"
+    assert levels["entry"] < sig.price
+    assert levels["stop"]  > levels["entry"]
+    assert levels["t1"]    < levels["entry"]
+
+
+def test_instrument_levels_none_on_missing_atr():
+    from india_quant.signals.global_context import SignalRow, instrument_levels
+    sig = SignalRow(
+        ticker="^GSPC", label="S&P 500", group="US",
+        pct_1d=0.5, pct_5d=1.0, direction="bullish",
+        corr_30d=0.7, corr_90d=0.65,
+        price=5800.0, atr_5d=None,
+    )
+    assert instrument_levels(sig, usdinr=83.0, capital=200_000) == {}
+
+
 def test_regime_neutral_when_mixed():
     from india_quant.signals.global_context import _classify_regime
     signals = [

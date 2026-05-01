@@ -339,3 +339,81 @@ def _classify_regime(signals: list[SignalRow]) -> tuple[str, list[str]]:
     if vix_price is not None: drivers.append(f"VIX {vix_price:.1f}")
     if dxy_1d is not None: drivers.append(f"DXY {dxy_1d:+.1f}%")
     return "NEUTRAL", drivers[:3]
+
+
+# ─── Instrument trade levels ──────────────────────────────────────────────────
+
+_LEVERAGE: dict[str, float] = {
+    "US":          10.0,
+    "Europe":      10.0,
+    "Asia":        10.0,
+    "FX":          50.0,
+    "Commodities": 16.0,
+}
+_TICKER_LEVERAGE: dict[str, float] = {
+    "GC=F": 25.0,
+    "NG=F": 20.0,
+}
+
+
+def instrument_levels(
+    sig: SignalRow,
+    usdinr: float,
+    capital: float,
+    risk_pct: float = 0.01,
+) -> dict:
+    """ATR-based ORB-style trade levels for a global instrument."""
+    if sig.ticker in REFERENCE_ONLY:
+        return {}
+    if sig.price is None or sig.atr_5d is None or sig.atr_5d <= 0:
+        return {}
+
+    atr   = sig.atr_5d
+    price = sig.price
+    buf   = price * 0.001
+
+    is_long = sig.direction == "bullish"
+
+    if is_long:
+        entry = round(price + buf, 4)
+        stop  = round(price - atr * 0.5, 4)
+        t1    = round(entry + atr * 1.5, 4)
+        t2    = round(entry + atr * 2.8, 4)
+    else:
+        entry = round(price - buf, 4)
+        stop  = round(price + atr * 0.5, 4)
+        t1    = round(entry - atr * 1.5, 4)
+        t2    = round(entry - atr * 2.8, 4)
+
+    risk_per_unit = abs(entry - stop)
+    if risk_per_unit <= 0:
+        return {}
+
+    leverage = _TICKER_LEVERAGE.get(sig.ticker, _LEVERAGE.get(sig.group, 10.0))
+
+    risk_inr = capital * risk_pct
+    is_inr = sig.group == "Asia" and sig.ticker.startswith("^CNX")
+    entry_inr = entry if is_inr else entry * usdinr
+    risk_per_unit_inr = risk_per_unit if is_inr else risk_per_unit * usdinr
+
+    qty = max(1, int(risk_inr / risk_per_unit_inr)) if risk_per_unit_inr > 0 else 1
+    margin_inr   = round(qty * entry_inr / leverage, 0)
+    max_loss_inr = round(qty * risk_per_unit_inr, 0)
+    profit1_inr  = round(qty * abs(t1 - entry) * (1 if is_inr else usdinr), 0)
+    rr1 = round(abs(t1 - entry) / risk_per_unit, 2)
+    rr2 = round(abs(t2 - entry) / risk_per_unit, 2)
+
+    return {
+        "side":         "LONG" if is_long else "SHORT",
+        "entry":        entry,
+        "stop":         stop,
+        "t1":           t1,
+        "t2":           t2,
+        "rr1":          rr1,
+        "rr2":          rr2,
+        "qty":          qty,
+        "margin_inr":   margin_inr,
+        "max_loss_inr": max_loss_inr,
+        "profit1_inr":  profit1_inr,
+        "currency":     "INR" if is_inr else "USD",
+    }
