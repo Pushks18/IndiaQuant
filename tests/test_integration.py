@@ -236,6 +236,16 @@ def test_regime_risk_on():
     assert regime == "RISK_ON"
 
 
+def test_global_signal_model_imports():
+    from india_quant.data.models import GlobalSignal
+    cols = {c.name for c in GlobalSignal.__table__.columns}
+    for expected in ("id", "date", "ticker", "label", "group",
+                     "pct_1d", "pct_5d", "corr_30d", "corr_90d", "regime"):
+        assert expected in cols, f"Missing column: {expected}"
+    constraints = {c.name for c in GlobalSignal.__table__.constraints}
+    assert any("global_signal" in (n or "") for n in constraints)
+
+
 def test_instrument_levels_long():
     from india_quant.signals.global_context import SignalRow, instrument_levels
     sig = SignalRow(
