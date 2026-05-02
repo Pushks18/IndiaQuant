@@ -1,0 +1,197 @@
+{# Global Playbook — index call, sector tilt, 3 horizon stock-pick tables #}
+
+{# ── Index Call card ─────────────────────────────────────────────────────── #}
+<section class="card section" style="border-left:4px solid
+  {% if playbook.conviction == 'HIGH' %}#22c55e
+  {% elif playbook.conviction == 'MEDIUM' %}#eab308
+  {% else %}#64748b{% endif %};">
+  <div class="card-hd">
+    <span class="title">Today's Playbook · Index Call</span>
+    <span class="meta">KNN over {{ playbook.knn.n_similar }} historical analog days</span>
+  </div>
+  <div class="card-bd" style="display:flex; gap:2rem; align-items:flex-start; flex-wrap:wrap">
+
+    {# Conviction badge + expected move #}
+    <div style="min-width:220px">
+      <div style="font-size:11px; color:#94a3b8; margin-bottom:4px">CONVICTION</div>
+      {% if playbook.conviction == 'HIGH' %}
+        <span class="badge bull" style="font-size:1.2rem; padding:6px 16px">HIGH</span>
+      {% elif playbook.conviction == 'MEDIUM' %}
+        <span class="badge" style="font-size:1.2rem; padding:6px 16px; background:#eab308; color:#0f172a">MEDIUM</span>
+      {% else %}
+        <span class="badge" style="font-size:1.2rem; padding:6px 16px; background:#475569; color:#cbd5e1">LOW · MIXED</span>
+      {% endif %}
+
+      <div style="margin-top:14px; font-size:11px; color:#94a3b8">EXPECTED NIFTY OPEN</div>
+      <div style="font-size:2rem; font-weight:bold; line-height:1.1;
+        color:{% if playbook.expected_open_pct > 0.1 %}#22c55e
+              {% elif playbook.expected_open_pct < -0.1 %}#ef4444
+              {% else %}#cbd5e1{% endif %}">
+        {{ '%+.2f%%'|format(playbook.expected_open_pct) }}
+      </div>
+      <div style="font-size:11px; color:#94a3b8; margin-top:4px">
+        IQR [{{ '%+.2f'|format(playbook.knn.iqr_low) }}%, {{ '%+.2f'|format(playbook.knn.iqr_high) }}%]
+        · hit-rate {{ '%.0f%%'|format(playbook.knn.hit_rate_long * 100) }}
+      </div>
+    </div>
+
+    {# Plain-English rationale #}
+    <div style="flex:1 1 320px; min-width:280px; max-width:560px;
+                font-size:13px; line-height:1.6; color:#cbd5e1; white-space:pre-line">
+      {{ playbook.rationale }}
+    </div>
+
+    {# Historical analog dates (collapsible) #}
+    <div style="min-width:180px">
+      <div style="font-size:11px; color:#94a3b8; margin-bottom:4px">HISTORICAL ANALOGS</div>
+      {% if playbook.knn.representative_dates %}
+        <details>
+          <summary style="cursor:pointer; font-size:12px; color:#60a5fa">
+            {{ playbook.knn.representative_dates|length }} similar past days
+          </summary>
+          <ul style="margin:4px 0 0; padding-left:16px; font-size:11px; line-height:1.6">
+            {% for d in playbook.knn.representative_dates %}
+              <li>{{ d }}</li>
+            {% endfor %}
+          </ul>
+        </details>
+      {% else %}
+        <span class="muted" style="font-size:12px">none</span>
+      {% endif %}
+    </div>
+  </div>
+</section>
+
+{# ── Matched rules (rationale chips) ──────────────────────────────────────── #}
+{% if playbook.matched_rules %}
+<section class="card section">
+  <div class="card-hd"><span class="title">Active Rules</span>
+    <span class="meta">{{ playbook.matched_rules|length }} matched</span>
+  </div>
+  <div class="card-bd" style="display:flex; gap:8px; flex-wrap:wrap">
+    {% for r in playbook.matched_rules %}
+      <details style="background:#1e293b; padding:8px 12px; border-radius:6px;
+                      border:1px solid #334155; min-width:280px; flex:1 1 320px; max-width:520px">
+        <summary style="cursor:pointer; font-size:13px; font-weight:bold; color:#e2e8f0">
+          {{ r.id }}
+        </summary>
+        <div style="margin-top:6px; font-size:12px; color:#cbd5e1; line-height:1.6; white-space:pre-line">
+          {{ r.rendered or r.description }}
+        </div>
+        {% if r.sector_tilt %}
+        <div style="margin-top:6px; font-size:11px; color:#94a3b8">
+          Sector tilt:
+          {% for sec, w in r.sector_tilt.items() %}
+            <span style="color:{% if w > 0 %}#22c55e{% elif w < 0 %}#ef4444{% endif %}">
+              {{ sec }} {{ '%+.1f'|format(w) }}
+            </span>{% if not loop.last %} · {% endif %}
+          {% endfor %}
+        </div>
+        {% endif %}
+      </details>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+{# ── Sector Tilt strip ───────────────────────────────────────────────────── #}
+{% if playbook.sector_ranks %}
+<section class="card section">
+  <div class="card-hd"><span class="title">Sector Tilt</span>
+    <span class="meta">positive = favoured · negative = avoid</span>
+  </div>
+  <div class="card-bd"><div class="table-wrap"><table class="x" style="font-size:12px">
+    <thead><tr>
+      <th>Sector</th>
+      <th class="text-right">Tilt Score</th>
+      <th>Bar</th>
+    </tr></thead>
+    <tbody>
+    {% for sec, w in playbook.sector_ranks %}
+      <tr>
+        <td>
+          <b>{{ sec }}</b>
+          {% if sec in playbook.favoured %}<span class="badge bull" style="font-size:10px; margin-left:6px">favoured</span>
+          {% elif sec in playbook.avoid %}<span class="badge bear" style="font-size:10px; margin-left:6px">avoid</span>
+          {% endif %}
+        </td>
+        <td class="text-right num
+          {% if w > 0.3 %}pos{% elif w < -0.3 %}neg{% endif %}">
+          {{ '%+.2f'|format(w) }}
+        </td>
+        <td style="width:40%">
+          <div style="width:100%; background:#1e293b; height:8px; border-radius:4px; overflow:hidden; position:relative">
+            <div style="position:absolute; left:50%; top:0; bottom:0; width:1px; background:#475569"></div>
+            {% set pct = ((w / 2.0) * 100)|round(0)|int %}
+            {% set abs_pct = pct if pct >= 0 else -pct %}
+            <div style="position:absolute; top:0; bottom:0;
+              {% if w >= 0 %}left:50%{% else %}right:50%{% endif %};
+              width:{{ abs_pct }}%;
+              background:{% if w >= 0 %}#22c55e{% else %}#ef4444{% endif %};
+              max-width:50%;"></div>
+          </div>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div></div>
+</section>
+{% endif %}
+
+{# ── Three horizon stock-pick tables ─────────────────────────────────────── #}
+{% set horizon_labels = {
+  "open":     "Next-Day Open Picks · exit by 10:00 IST",
+  "intraday": "Intraday Picks · 5-min ORB style · exit by 15:30 IST",
+  "swing":    "5-Day Swing Picks · positional · exit at +5d or T2",
+} %}
+{% for h in ["open", "intraday", "swing"] %}
+  {% set hc = playbook.horizons.get(h) %}
+  {% if hc %}
+  <section class="card section">
+    <div class="card-hd">
+      <span class="title">{{ horizon_labels[h] }}</span>
+      <span class="meta">{{ hc.stock_picks|length }} picks · favoured sectors: {{ playbook.favoured|join(', ') or '—' }}</span>
+    </div>
+    <div class="card-bd flush"><div class="table-wrap"><table class="x" style="font-size:12px">
+      <thead><tr>
+        <th>Ticker</th><th>Sector</th><th>Bias</th>
+        <th class="text-right">Score</th>
+        <th class="text-right">Entry</th><th class="text-right">Stop</th>
+        <th class="text-right">T1</th><th class="text-right">T2</th>
+        <th class="text-right">R:R</th>
+        <th class="text-right">Qty</th>
+        <th class="text-right">Margin ₹</th>
+        <th class="text-right">Max Loss</th>
+        <th class="text-right">T1 Profit</th>
+      </tr></thead>
+      <tbody>
+      {% for p in hc.stock_picks %}
+      <tr>
+        <td><a class="ticker-pill" href="/ticker/{{ p.ticker.replace('.NS','') }}">{{ p.ticker.replace('.NS','') }}</a></td>
+        <td class="muted" style="font-size:11px">{{ p.sector }}</td>
+        <td>{% if p.bias == 'LONG' %}<span class="badge bull">long</span>{% else %}<span class="badge bear">short</span>{% endif %}</td>
+        <td class="text-right num">{{ '%.0f' % p.score }}</td>
+        <td class="text-right num {% if p.bias == 'LONG' %}pos{% else %}neg{% endif %}">{{ p.entry }}</td>
+        <td class="text-right num {% if p.bias == 'LONG' %}neg{% else %}pos{% endif %}">{{ p.stop }}</td>
+        <td class="text-right num pos">{{ p.t1 }}</td>
+        <td class="text-right num pos">{{ p.t2 }}</td>
+        <td class="text-right num">{{ p.rr1 }}R</td>
+        <td class="text-right num">{{ p.qty }}</td>
+        <td class="text-right num">₹{{ '{:,.0f}'.format(p.margin_inr) }}</td>
+        <td class="text-right num neg">−₹{{ '{:,.0f}'.format(p.max_loss_inr) }}</td>
+        <td class="text-right num pos">+₹{{ '{:,.0f}'.format(p.profit1_inr) }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="13" class="text-center muted">
+        {% if playbook.conviction == 'LOW' %}
+          MIXED conviction — no directional picks today. Trade individual setups on merit.
+        {% else %}
+          No qualifying setups in favoured sectors.
+        {% endif %}
+      </td></tr>
+      {% endfor %}
+      </tbody>
+    </table></div></div>
+  </section>
+  {% endif %}
+{% endfor %}

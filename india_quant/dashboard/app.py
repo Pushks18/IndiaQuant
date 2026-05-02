@@ -139,6 +139,7 @@ def create_app() -> Flask:
     def global_context_page():
         from india_quant.signals.global_context import get_global_context, instrument_levels
         from india_quant.signals.screener import run_screener
+        from india_quant.signals.playbook_engine import generate_playbook
 
         try:    capital  = float(request.args.get("capital", 200_000))
         except ValueError: capital = 200_000
@@ -148,6 +149,12 @@ def create_app() -> Flask:
         except ValueError: top_n = 10
 
         ctx = get_global_context()
+
+        try:
+            playbook = generate_playbook(ctx, capital=capital, risk_pct=risk_pct)
+        except Exception as e:
+            logger.error(f"playbook generation failed: {e}")
+            playbook = None
 
         signal_levels = {}
         for sig in ctx.signals:
@@ -169,12 +176,13 @@ def create_app() -> Flask:
         return render_template(
             "global_context.html",
             ctx=ctx,
+            playbook=playbook,
             signal_levels=signal_levels,
             plans=actionable,
             capital=capital,
             risk_pct=risk_pct * 100,
             top_n=top_n,
-            today=ddata.latest_trading_date().isoformat(),
+            today=ctx.fetched_at.strftime("%Y-%m-%d"),
         )
 
     @app.route("/debates")

@@ -18,6 +18,11 @@
   </form>
 </div>
 
+{# ── Section 0: Playbook (NEW — index call → sector tilt → 3 horizon picks) ── #}
+{% if playbook %}
+{% include "_playbook_section.html" %}
+{% endif %}
+
 {# ── Section 1: Day Bias Card ────────────────────────────────────────────── #}
 <section class="card section">
   <div class="card-hd"><span class="title">Today's Global Bias</span>
