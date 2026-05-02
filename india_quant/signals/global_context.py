@@ -377,6 +377,58 @@ _TICKER_LEVERAGE: dict[str, float] = {
 }
 
 
+# ─── Time-ordered signal vector for playbook engine ───────────────────────────
+
+TIME_ORDERED_WEIGHTS: dict[str, float] = {
+    "Asia":        0.50,
+    "US":          0.30,
+    "FX":          0.15,
+    "Europe":      0.05,
+    "Commodities": 0.10,
+}
+
+
+def time_ordered_signal_vector(ctx: "GlobalContext") -> dict:
+    """6-dim signal snapshot consumed by the playbook KNN engine.
+
+    Output keys are stable so they align with the global_signals history
+    table for z-score / KNN distance calculations.
+    """
+    by_ticker = {s.ticker: s for s in ctx.signals}
+
+    def _f(ticker: str, attr: str = "pct_1d") -> Optional[float]:
+        s = by_ticker.get(ticker)
+        if s is None:
+            return None
+        return getattr(s, attr, None)
+
+    raw = {
+        "sp_pct_1d":     _f("^GSPC"),
+        "nikkei_pct_1d": _f("^N225"),
+        "dxy_pct_1d":    _f("DX-Y.NYB"),
+        "usdinr_pct_1d": _f("USDINR=X"),
+        "vix_price":     _f("^VIX", "price"),
+        "crude_pct_1d":  _f("CL=F"),
+    }
+
+    # Group-weighted directional contribution (signed; positive = bullish for Nifty)
+    group_directional = {
+        "US":          (raw["sp_pct_1d"]     or 0.0),
+        "Asia":        (raw["nikkei_pct_1d"] or 0.0),
+        "FX":          -(raw["dxy_pct_1d"]   or 0.0)
+                       - (raw["usdinr_pct_1d"] or 0.0),
+        "Commodities": -(raw["crude_pct_1d"] or 0.0),
+        "Europe":      0.0,
+    }
+    weighted = {g: round(group_directional[g] * w, 4)
+                for g, w in TIME_ORDERED_WEIGHTS.items()
+                if g in group_directional}
+
+    raw["group_weighted"] = weighted
+    raw["weighted_sum"]   = round(sum(weighted.values()), 4)
+    return raw
+
+
 def instrument_levels(
     sig: SignalRow,
     usdinr: float,

@@ -1,0 +1,202 @@
+# Global Playbook Rules
+# ─────────────────────
+# Each rule fires when ALL `triggers` match (AND).
+# Multiple rules can fire simultaneously; sector_tilt scores sum.
+# Triggers reference the time_ordered_signal_vector() keys + raw signals.
+#
+# template placeholders:
+#   {sp_pct_1d}, {nikkei_pct_1d}, {hsi_pct_1d}, {dxy_pct_1d},
+#   {usdinr_pct_1d}, {vix_price}, {crude_pct_1d},
+#   {median_open_pct}, {iqr_low}, {iqr_high},
+#   {n_similar}, {k}, {hit_rate_long}
+
+- id: asia_lead_bullish
+  description: Tokyo + S&P up overnight, VIX subdued
+  triggers:
+    nikkei_pct_1d: { min: 0.5 }
+    sp_pct_1d:     { min: 0.0 }
+    vix_price:     { max: 18.0 }
+  sector_tilt:
+    BANK:    +0.8
+    IT:      +0.6
+    REALTY:  +0.4
+    AUTO:    +0.3
+    PHARMA:  -0.2
+  template: >
+    Asia rallied overnight — Nikkei {nikkei_pct_1d:+.1f}%, S&P {sp_pct_1d:+.1f}%,
+    VIX subdued at {vix_price:.1f}. Historical lead: Nifty opens
+    {median_open_pct:+.2f}% on {n_similar}/{k} similar days, hit-rate {hit_rate_long:.0%}.
+    Favour BANK and IT setups; trim defensives like pharma.
+
+- id: asia_lead_bearish
+  description: Tokyo down + S&P weak, risk-off creeping in
+  triggers:
+    nikkei_pct_1d: { max: -0.5 }
+    sp_pct_1d:     { max: 0.0 }
+  sector_tilt:
+    BANK:    -0.7
+    IT:      -0.5
+    METAL:   -0.5
+    PHARMA:  +0.4
+    FMCG:    +0.3
+  template: >
+    Asia weak overnight — Nikkei {nikkei_pct_1d:+.1f}%, S&P {sp_pct_1d:+.1f}%.
+    Historical lead: Nifty opens {median_open_pct:+.2f}% on
+    {n_similar}/{k} similar days. Defensive rotation — favour FMCG/PHARMA,
+    avoid BANK/IT longs.
+
+- id: us_strong_inr_weak
+  description: US risk-on but rupee weakening — net positive for IT/exports
+  triggers:
+    sp_pct_1d:     { min: 0.5 }
+    usdinr_pct_1d: { min: 0.15 }
+  sector_tilt:
+    IT:      +0.7
+    PHARMA:  +0.4
+    METAL:   -0.3
+    AUTO:    -0.2
+  template: >
+    US strong (S&P {sp_pct_1d:+.1f}%) and INR weakening
+    ({usdinr_pct_1d:+.2f}%). IT/Pharma exporters benefit on translation
+    tailwind; metals and auto pressured by import cost.
+
+- id: us_weak_inr_strong
+  description: US weak but rupee firming — domestic plays favoured
+  triggers:
+    sp_pct_1d:     { max: -0.4 }
+    usdinr_pct_1d: { max: -0.15 }
+  sector_tilt:
+    BANK:    +0.5
+    FMCG:    +0.4
+    AUTO:    +0.3
+    IT:      -0.5
+    PHARMA:  -0.3
+  template: >
+    US weak (S&P {sp_pct_1d:+.1f}%) but INR firming
+    ({usdinr_pct_1d:+.2f}%). Rotation from exporters to domestic
+    consumption — favour BANK / FMCG, trim IT longs.
+
+- id: dxy_breakout_em_pressure
+  description: Dollar index spike — broad EM pressure
+  triggers:
+    dxy_pct_1d:    { min: 0.4 }
+    usdinr_pct_1d: { min: 0.2 }
+  sector_tilt:
+    BANK:    -0.5
+    METAL:   -0.4
+    REALTY:  -0.3
+    IT:      +0.4
+    PHARMA:  +0.3
+  template: >
+    Dollar breaking out (DXY {dxy_pct_1d:+.2f}%, USDINR {usdinr_pct_1d:+.2f}%).
+    Broad EM pressure — banks and rate-sensitives weak, exporter cushion
+    in IT/Pharma.
+
+- id: crude_spike_inflation_risk
+  description: Crude rallying hard — inflation/CAD drag
+  triggers:
+    crude_pct_1d:  { min: 2.0 }
+  sector_tilt:
+    ENERGY:  +0.6
+    METAL:   -0.3
+    AUTO:    -0.4
+    FMCG:    -0.3
+    PAINTS:  -0.4
+  template: >
+    Crude spiked {crude_pct_1d:+.1f}% — inflation and current-account
+    headwind. Upstream energy benefits (RELIANCE, ONGC); auto/paints/FMCG
+    margins compress.
+
+- id: crude_crash_consumption_boost
+  description: Crude collapse — boost to consumption + auto
+  triggers:
+    crude_pct_1d:  { max: -2.0 }
+  sector_tilt:
+    AUTO:    +0.5
+    FMCG:    +0.4
+    BANK:    +0.3
+    ENERGY:  -0.5
+  template: >
+    Crude crashed {crude_pct_1d:+.1f}% — disinflationary tailwind.
+    Auto and FMCG margins expand; upstream energy under pressure.
+
+- id: vix_spike_risk_off
+  description: VIX jumping — global risk-off, defensives only
+  triggers:
+    vix_price:     { min: 22.0 }
+  sector_tilt:
+    BANK:    -0.8
+    IT:      -0.5
+    METAL:   -0.6
+    REALTY:  -0.7
+    PHARMA:  +0.5
+    FMCG:    +0.6
+  template: >
+    VIX spiked to {vix_price:.1f} — global risk-off. Cyclicals and
+    leverage names hit; pharma/FMCG defensives outperform. Reduce
+    aggressive long size today.
+
+- id: vix_low_complacent_bullish
+  description: VIX very low — momentum + risk-on continuation
+  triggers:
+    vix_price:     { max: 13.0 }
+    sp_pct_1d:     { min: 0.0 }
+  sector_tilt:
+    BANK:    +0.6
+    AUTO:    +0.5
+    REALTY:  +0.5
+    METAL:   +0.4
+    PHARMA:  -0.3
+  template: >
+    VIX low at {vix_price:.1f} with US firm — complacent bullish regime.
+    Cyclicals and high-beta names favoured; pharma defensives lag.
+
+- id: nikkei_strong_cyclical_lead
+  description: Nikkei +1%+ alone (US flat) — Asia cyclical lead
+  triggers:
+    nikkei_pct_1d: { min: 1.0 }
+    sp_pct_1d:     { min: -0.3, max: 0.5 }
+  sector_tilt:
+    AUTO:    +0.6
+    METAL:   +0.5
+    BANK:    +0.4
+    IT:      +0.2
+  template: >
+    Nikkei rallied {nikkei_pct_1d:+.1f}% on its own (US flat at
+    {sp_pct_1d:+.1f}%). Asia cyclical lead — auto / metals /
+    bank-led move likely.
+
+- id: hsi_china_drag
+  description: Hang Seng / Shanghai sharp down — metals + commodities drag
+  triggers:
+    hsi_pct_1d:    { max: -1.0 }
+  sector_tilt:
+    METAL:   -0.6
+    ENERGY:  -0.3
+    PHARMA:  +0.2
+    FMCG:    +0.3
+  template: >
+    China weakness — Hang Seng {hsi_pct_1d:+.1f}%. Metals and
+    commodity-linked names face direct selling pressure.
+
+- id: us_tech_rally_it_lead
+  description: Nasdaq strong — Indian IT bid follows
+  triggers:
+    sp_pct_1d:     { min: 0.3 }
+    nasdaq_pct_1d: { min: 0.6 }
+  sector_tilt:
+    IT:      +0.9
+    PHARMA:  +0.3
+    BANK:    +0.2
+  template: >
+    Nasdaq rallied — IT bid likely. TCS / INFY / HCLTECH typically lead
+    on Nasdaq +1%+ days.
+
+- id: mixed_signals_neutral
+  description: Catch-all for low-conviction days; explicit no-trade flag
+  triggers:
+    weighted_sum:  { min: -0.15, max: 0.15 }
+  sector_tilt: {}
+  template: >
+    Mixed global signals — no directional Nifty bias today. Trade
+    individual setups on their own merit; reduce position sizes.
