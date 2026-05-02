@@ -40,14 +40,41 @@ for g_tickers in _GROUPS.values():
     TICKER_LABEL.update(g_tickers)
 
 
+def _flatten_to_series(obj) -> pd.Series:
+    """yfinance sometimes returns a 1-column DataFrame; coerce to Series."""
+    if isinstance(obj, pd.DataFrame):
+        if obj.shape[1] == 1:
+            return obj.iloc[:, 0]
+        return obj.squeeze()
+    return obj
+
+
+def _normalize_index(s: pd.Series) -> pd.Series:
+    if s.empty:
+        return s
+    idx = s.index
+    try:
+        if getattr(idx, "tz", None) is not None:
+            idx = idx.tz_localize(None)
+    except Exception:
+        pass
+    try:
+        idx = idx.normalize()
+    except Exception:
+        pass
+    out = s.copy()
+    out.index = idx
+    return out
+
+
 def _compute_corr_series(returns: pd.Series, nifty_ret: pd.Series, window: int) -> pd.Series:
     """Rolling Pearson correlation of returns vs nifty_ret."""
-    combined = pd.concat([returns, nifty_ret], axis=1).dropna()
+    a = _normalize_index(_flatten_to_series(returns))
+    b = _normalize_index(_flatten_to_series(nifty_ret))
+    combined = pd.concat([a, b], axis=1, join="inner").dropna()
     if len(combined) < window:
         return pd.Series(dtype=float)
-    r1 = combined.iloc[:, 0].rolling(window)
-    r2 = combined.iloc[:, 1].rolling(window)
-    return r1.corr(r2)
+    return combined.iloc[:, 0].rolling(window).corr(combined.iloc[:, 1])
 
 
 def backfill(days: int = 365):
@@ -58,8 +85,9 @@ def backfill(days: int = 365):
     period = f"{days + 30}d"
     logger.info(f"Downloading {len(ALL_TICKERS)} tickers, period={period} ...")
 
-    nifty_close = yf.download("^NSEI", period=period, auto_adjust=True, progress=False)["Close"]
-    nifty_ret   = nifty_close.pct_change().dropna()
+    nifty_raw   = yf.download("^NSEI", period=period, auto_adjust=True, progress=False)
+    nifty_close = _flatten_to_series(nifty_raw["Close"])
+    nifty_ret   = _normalize_index(nifty_close.pct_change().dropna())
 
     df = yf.download(ALL_TICKERS, period=period, auto_adjust=True, progress=True, threads=True)
     if df.empty:
@@ -79,6 +107,7 @@ def backfill(days: int = 365):
                 if len(close) < 32:
                     continue
 
+                close   = _normalize_index(close)
                 returns = close.pct_change().dropna()
                 corr30  = _compute_corr_series(returns, nifty_ret, 30)
                 corr90  = _compute_corr_series(returns, nifty_ret, 90)
@@ -92,8 +121,10 @@ def backfill(days: int = 365):
                         prev5 = float(close.iloc[pos - 5])
                         pct_5d = round((float(close.loc[dt]) / prev5 - 1) * 100, 3) if prev5 else None
 
-                    c30 = float(corr30.loc[dt]) if dt in corr30.index and not pd.isna(corr30.loc[dt]) else None
-                    c90 = float(corr90.loc[dt]) if dt in corr90.index and not pd.isna(corr90.loc[dt]) else None
+                    c30_raw = corr30.loc[dt] if dt in corr30.index else None
+                    c90_raw = corr90.loc[dt] if dt in corr90.index else None
+                    c30 = float(c30_raw) if c30_raw is not None and not pd.isna(c30_raw) else None
+                    c90 = float(c90_raw) if c90_raw is not None and not pd.isna(c90_raw) else None
 
                     stmt = pg_insert(GlobalSignal).values(
                         date=trade_date,
