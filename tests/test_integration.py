@@ -400,6 +400,123 @@ def test_regime_neutral_when_mixed():
     assert regime == "NEUTRAL"
 
 
+# ── Playbook engine tests ─────────────────────────────────────────────────────
+
+def test_fo_universe_loads():
+    from india_quant.data.fo_universe import FO_TICKERS, TICKER_SECTOR, SECTOR_INDEX_TICKER
+    assert len(FO_TICKERS) > 100
+    assert "HDFCBANK.NS" in FO_TICKERS
+    assert TICKER_SECTOR["HDFCBANK.NS"] == "BANK"
+    assert SECTOR_INDEX_TICKER["BANK"] == "^NSEBANK"
+    for t in FO_TICKERS:
+        assert TICKER_SECTOR[t]
+
+
+def test_time_ordered_vector_weights_asia_dominant():
+    from india_quant.signals.global_context import TIME_ORDERED_WEIGHTS
+    assert TIME_ORDERED_WEIGHTS["Asia"] > TIME_ORDERED_WEIGHTS["US"]
+    assert TIME_ORDERED_WEIGHTS["US"]   > TIME_ORDERED_WEIGHTS["FX"]
+    assert TIME_ORDERED_WEIGHTS["FX"]   > TIME_ORDERED_WEIGHTS["Europe"]
+
+
+def test_time_ordered_vector_signs():
+    from india_quant.signals.global_context import (
+        SignalRow, GlobalContext, time_ordered_signal_vector
+    )
+    from datetime import datetime, timezone
+    def _s(t, p):
+        return SignalRow(t, t, "X", p, None, "neutral", None, None, 100.0, None)
+    ctx = GlobalContext(
+        fetched_at=datetime.now(timezone.utc), regime="NEUTRAL", regime_drivers=[],
+        signals=[
+            _s("^GSPC", 0.5), _s("^N225", 0.8),
+            _s("DX-Y.NYB", 0.4), _s("USDINR=X", 0.2),
+            _s("CL=F", 1.0),
+        ],
+        nifty_bias_text="",
+    )
+    v = time_ordered_signal_vector(ctx)
+    assert v["group_weighted"]["FX"] < 0
+    assert v["group_weighted"]["Commodities"] < 0
+    assert v["group_weighted"]["Asia"] > 0
+    assert v["group_weighted"]["US"]   > 0
+
+
+def test_rule_match_triggers_when_within_thresholds():
+    from india_quant.signals.playbook_engine import _trigger_match
+    assert _trigger_match(0.7, {"min": 0.5})
+    assert _trigger_match(17.0, {"max": 18.0})
+    assert _trigger_match(0.7, {"min": 0.5, "max": 1.0})
+
+
+def test_rule_match_rejects_outside_thresholds():
+    from india_quant.signals.playbook_engine import _trigger_match
+    assert not _trigger_match(0.3, {"min": 0.5})
+    assert not _trigger_match(19.0, {"max": 18.0})
+    assert not _trigger_match(None, {"min": 0.5})
+
+
+def test_match_rules_returns_asia_lead_bullish():
+    from india_quant.signals.playbook_engine import match_rules
+    snap = {"sp_pct_1d": 0.4, "nikkei_pct_1d": 0.8, "vix_price": 15.0,
+            "dxy_pct_1d": 0.0, "usdinr_pct_1d": 0.0, "crude_pct_1d": 0.0,
+            "weighted_sum": 0.6}
+    matched = match_rules(snap, ctx=None)
+    ids = [m.id for m in matched]
+    assert "asia_lead_bullish" in ids
+
+
+def test_match_rules_mixed_signals_neutral():
+    from india_quant.signals.playbook_engine import match_rules
+    snap = {"sp_pct_1d": 0.05, "nikkei_pct_1d": 0.05, "vix_price": 18.0,
+            "dxy_pct_1d": 0.0, "usdinr_pct_1d": 0.0, "crude_pct_1d": 0.0,
+            "weighted_sum": 0.05}
+    matched = match_rules(snap, ctx=None)
+    assert any(m.id == "mixed_signals_neutral" for m in matched)
+
+
+def test_sector_tilt_aggregates_across_rules():
+    from india_quant.signals.playbook_engine import sector_tilt, MatchedRule
+    rules = [
+        MatchedRule("a", "", {"BANK": 0.5, "IT": -0.3}, "", ""),
+        MatchedRule("b", "", {"BANK": 0.4, "PHARMA": 0.2}, "", ""),
+    ]
+    ranked = sector_tilt(rules)
+    by_sector = dict(ranked)
+    assert abs(by_sector["BANK"] - 0.9) < 1e-6
+    assert abs(by_sector["IT"]   - (-0.3)) < 1e-6
+    assert abs(by_sector["PHARMA"] - 0.2) < 1e-6
+
+
+def test_conviction_low_when_no_neighbors():
+    from india_quant.signals.playbook_engine import reconcile, KNNResult
+    knn = KNNResult(0, 0.0, 0.0, 0.0, 0.0, [])
+    tier, rationale = reconcile(knn, [])
+    assert tier == "LOW"
+
+
+def test_conviction_high_when_strong_clean_signal():
+    from india_quant.signals.playbook_engine import reconcile, KNNResult, MatchedRule
+    knn = KNNResult(8, 0.55, 0.30, 0.70, 0.75, [])
+    tier, _ = reconcile(knn, [MatchedRule("a", "", {}, "", "Asia rallied. Long bias.")])
+    assert tier == "HIGH"
+
+
+def test_conviction_medium_between_thresholds():
+    from india_quant.signals.playbook_engine import reconcile, KNNResult
+    knn = KNNResult(8, 0.30, 0.0, 0.7, 0.55, [])
+    tier, _ = reconcile(knn, [])
+    assert tier == "MEDIUM"
+
+
+def test_playbook_handles_empty_history(monkeypatch):
+    from india_quant.signals import playbook_engine
+    monkeypatch.setattr(playbook_engine, "_build_history", lambda: None)
+    snap = {f: 0.0 for f in playbook_engine.KNN_FEATURES}
+    knn = playbook_engine.knn_lookup(snap)
+    assert knn.n_similar == 0
+
+
 # ── Go-live checklist ─────────────────────────────────────────────────────────
 
 def print_go_live_checklist():
