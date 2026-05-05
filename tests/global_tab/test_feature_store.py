@@ -79,3 +79,41 @@ def test_features_method_lists_registered_names():
     store.register("a", _series((datetime(2026, 5, 1), 1.0)))
     store.register("b", _series((datetime(2026, 5, 1), 2.0)))
     assert sorted(store.features()) == ["a", "b"]
+
+
+from hypothesis import given, settings
+from hypothesis import strategies as st
+
+
+@st.composite
+def _series_and_query(draw):
+    n = draw(st.integers(min_value=1, max_value=40))
+    base = datetime(2020, 1, 1)
+    offsets = sorted(draw(st.lists(st.integers(min_value=0, max_value=3650), min_size=n, max_size=n, unique=True)))
+    timestamps = [base + pd.Timedelta(days=o) for o in offsets]
+    values = draw(st.lists(st.floats(min_value=-1e6, max_value=1e6, allow_nan=False, allow_infinity=False), min_size=n, max_size=n))
+    series = pd.Series(values, index=pd.DatetimeIndex(timestamps), dtype=float)
+    query_offset = draw(st.integers(min_value=-50, max_value=4000))
+    query_at = base + pd.Timedelta(days=query_offset)
+    return series, query_at
+
+
+@settings(max_examples=300, deadline=None)
+@given(_series_and_query())
+def test_property_no_future_peek(series_and_query):
+    series, query_at = series_and_query
+    store = PointInTimeFeatureStore()
+    store.register("f", series)
+
+    eligible = series.loc[series.index <= pd.Timestamp(query_at)]
+    if eligible.empty:
+        with pytest.raises(FuturePeekError):
+            store.get("f", query_at)
+        return
+
+    value = store.get("f", query_at)
+    # The returned value must equal the LATEST observation with index <= query_at.
+    assert value == float(eligible.iloc[-1])
+    # And the source timestamp of that observation must be <= query_at.
+    source_ts = eligible.index[-1]
+    assert source_ts <= pd.Timestamp(query_at)
