@@ -50,6 +50,10 @@ weasyprint==62.3
 
 # Testing
 pytest==8.3.4
+hypothesis==6.122.3
+
+# Storage (parquet)
+pyarrow==18.1.0
 
 # Web (health endpoint)
 flask==3.1.0
