@@ -1,4 +1,4 @@
-"""Tests for the GIFT Nifty NSE-IFSC scraper."""
+"""Tests for the GIFT Nifty investing.com fetcher."""
 from pathlib import Path
 from unittest.mock import patch
 
