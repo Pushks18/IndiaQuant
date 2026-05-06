@@ -233,6 +233,88 @@ def data_health() -> dict:
     }
 
 
+def load_global_history(lookback_days: int = 120) -> "pd.DataFrame":
+    """Load wide history DataFrame for the correlation heatmap.
+
+    Returns a DataFrame indexed by date with columns matching the names
+    expected by ``india_quant.global_tab.correlation.build_heatmap``:
+    [BANKNIFTY, SPX, NASDAQ, DXY, BRENT, INDIA_VIX, US10Y, NIKKEI, HSI, FTSE].
+
+    NIFTY (^NSEI) is absent from the global_signals table; only BANKNIFTY is
+    available there, so the heatmap will only compute BANKNIFTY rows.
+
+    Price values are reconstructed from cumulative daily % returns (pct_1d),
+    anchored at 1.0, which yields valid log-return correlations.
+
+    Missing tickers produce missing columns; correlation.py silently skips them.
+    If the DB is empty (pipeline not yet run), returns an empty DataFrame.
+    """
+    import pandas as pd
+    from datetime import date as date_cls, timedelta
+    from india_quant.data.db import get_session
+    from india_quant.data.models import GlobalSignal
+
+    # Map column names (used by build_heatmap) -> yfinance / DB ticker symbols
+    source_map: dict[str, str] = {
+        "NIFTY":     "^NSEI",       # not in DB; included so we can try
+        "BANKNIFTY": "^NSEBANK",
+        "SPX":       "^GSPC",
+        "NASDAQ":    "^IXIC",
+        "DXY":       "DX-Y.NYB",
+        "BRENT":     "BZ=F",        # may not be in DB yet; graceful skip
+        "INDIA_VIX": "^VIX",
+        "US10Y":     "^TNX",
+        "NIKKEI":    "^N225",
+        "HSI":       "^HSI",
+        "FTSE":      "^FTSE",
+    }
+
+    end = date_cls.today()
+    start = end - timedelta(days=lookback_days * 2)  # buffer for weekends/holidays
+
+    # Invert to look up col_name by db_ticker
+    db_to_col: dict[str, str] = {v: k for k, v in source_map.items()}
+    db_tickers = list(source_map.values())
+
+    series: dict[str, "pd.Series"] = {}
+    with get_session() as s:
+        rows = (
+            s.query(GlobalSignal.ticker, GlobalSignal.date, GlobalSignal.pct_1d)
+            .filter(GlobalSignal.ticker.in_(db_tickers))
+            .filter(GlobalSignal.date >= start)
+            .order_by(GlobalSignal.ticker, GlobalSignal.date)
+            .all()
+        )
+
+    # Group by ticker
+    from collections import defaultdict
+    grouped: dict[str, list] = defaultdict(list)
+    for ticker, dt, pct in rows:
+        if pct is not None:
+            grouped[ticker].append((dt, float(pct)))
+
+    for db_ticker, points in grouped.items():
+        col_name = db_to_col.get(db_ticker)
+        if not col_name:
+            continue
+        points.sort(key=lambda x: x[0])
+        dates = [p[0] for p in points]
+        pcts = [p[1] for p in points]
+        idx = pd.DatetimeIndex(dates)
+        # Reconstruct synthetic price from cumulative returns (anchored at 1.0)
+        # pct_1d is in percent (e.g. 0.91 means +0.91%)
+        factors = pd.Series(pcts, index=idx) / 100.0 + 1.0
+        synthetic_price = factors.cumprod()
+        series[col_name] = synthetic_price
+
+    if not series:
+        return pd.DataFrame()
+
+    df = pd.concat(series, axis=1)
+    df = df.sort_index()
+    return df
+
+
 def signal_summary() -> list[dict]:
     """Per-ticker signal summary: latest close, change, factor scores, ML prediction, latest verdict."""
     with get_session() as s:

@@ -137,52 +137,44 @@ def create_app() -> Flask:
 
     @app.route("/global")
     def global_context_page():
-        from india_quant.signals.global_context import get_global_context, instrument_levels
-        from india_quant.signals.screener import run_screener
-        from india_quant.signals.playbook_engine import generate_playbook
+        from datetime import datetime, date as date_cls
+        from india_quant.signals.global_context import get_global_context
+        from india_quant.data.fetchers.gift_nifty_fetcher import fetch_gift_nifty_quote
+        from india_quant.global_tab.briefing import build_briefing
+        from india_quant.global_tab.correlation import build_heatmap
+        from india_quant.global_tab.heatmap_view import render_heatmap_html
 
-        try:    capital  = float(request.args.get("capital", 200_000))
-        except ValueError: capital = 200_000
-        try:    risk_pct = float(request.args.get("risk", 1.0)) / 100.0
-        except ValueError: risk_pct = 0.01
-        try:    top_n    = int(request.args.get("top", 10))
-        except ValueError: top_n = 10
-
-        ctx = get_global_context()
+        as_of = datetime.now()
+        warnings: list[str] = []
 
         try:
-            playbook = generate_playbook(ctx, capital=capital, risk_pct=risk_pct)
-        except Exception as e:
-            logger.error(f"playbook generation failed: {e}")
-            playbook = None
+            ctx = get_global_context()
+        except Exception as exc:
+            logger.warning("global_context fetch failed: {}", exc)
+            ctx = type("EmptyCtx", (), {"signals": []})()
+            warnings.append("Live global signals unavailable; tiles fall back to —")
 
-        signal_levels = {}
-        for sig in ctx.signals:
-            lvl = instrument_levels(sig, usdinr=ctx.usdinr, capital=capital, risk_pct=risk_pct)
-            if lvl:
-                signal_levels[sig.ticker] = lvl
+        gift = fetch_gift_nifty_quote()
+        if gift is None:
+            warnings.append("GIFT Nifty source unreachable; tile shows —")
 
-        plans = run_screener(capital_inr=capital, risk_per_trade_pct=risk_pct, top_n=top_n)
-        actionable = []
-        for p in plans:
-            if p.get("bias") not in ("LONG", "SHORT"):
-                continue
-            if   ctx.regime == "RISK_ON"  and p["bias"] == "LONG":  p["global_aligned"] = True
-            elif ctx.regime == "RISK_OFF" and p["bias"] == "SHORT": p["global_aligned"] = True
-            elif ctx.regime == "NEUTRAL":                           p["global_aligned"] = True
-            else:                                                   p["global_aligned"] = False
-            actionable.append(p)
+        briefing = build_briefing(as_of=as_of, context=ctx, gift_nifty=gift)
+
+        try:
+            history = ddata.load_global_history(lookback_days=120)
+            heatmap = build_heatmap(history=history, as_of=date_cls.today())
+            heatmap_html = render_heatmap_html(heatmap)
+        except Exception as exc:
+            logger.warning("heatmap build failed: {}", exc)
+            heatmap_html = '<div class="heatmap-empty">Heatmap unavailable today.</div>'
+            warnings.append("Correlation heatmap unavailable; check DB connectivity")
 
         return render_template(
-            "global_context.html",
-            ctx=ctx,
-            playbook=playbook,
-            signal_levels=signal_levels,
-            plans=actionable,
-            capital=capital,
-            risk_pct=risk_pct * 100,
-            top_n=top_n,
-            today=ctx.fetched_at.strftime("%Y-%m-%d"),
+            "global_v2.html",
+            as_of=as_of,
+            briefing=briefing,
+            heatmap_html=heatmap_html,
+            data_warnings=warnings,
         )
 
     @app.route("/debates")
