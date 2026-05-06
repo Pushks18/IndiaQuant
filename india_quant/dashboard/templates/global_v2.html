@@ -4,6 +4,18 @@
 <div class="global-tab">
   <h1>Global · {{ as_of.strftime("%a %d %b %Y · %H:%M IST") }}</h1>
 
+  <form method="GET" class="global-controls">
+    <label>Capital ₹ <input type="number" name="capital" value="{{ capital|int }}" min="1000" step="1000"></label>
+    <label>Mode
+      <select name="mode">
+        {% for m in ["aggressive", "balanced", "conservative"] %}
+          <option value="{{ m }}" {% if mode.value == m %}selected{% endif %}>{{ m|capitalize }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <button type="submit">Apply</button>
+  </form>
+
   <section class="briefing-strip">
     {% for tile in briefing.tiles %}
     <div class="tile tile-{{ tile.sentiment }}">
@@ -28,6 +40,14 @@
     {{ heatmap_html|safe }}
   </section>
 
+  {% if cards %}
+  <section class="tickets-grid">
+    {% for card in cards %}
+      {% include "_card.html" %}
+    {% endfor %}
+  </section>
+  {% endif %}
+
   {% if data_warnings %}
   <section class="data-warnings">
     {% for w in data_warnings %}<p>&#9888; {{ w }}</p>{% endfor %}
@@ -47,5 +67,27 @@
 .predicted-gap { padding: 8px; background: #263238; color: white; border-radius: 6px; margin-bottom: 16px; }
 .heatmap-section { margin-top: 24px; }
 .data-warnings p { color: #ff8a65; }
+.global-controls { display: flex; gap: 12px; align-items: end; margin-bottom: 12px; }
+.global-controls label { display: flex; flex-direction: column; font-size: 12px; color: #cfd8dc; }
+.global-controls input, .global-controls select { padding: 4px 6px; }
+.global-controls button { padding: 6px 14px; }
+.tickets-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 16px; margin-top: 24px; }
+.ticket { padding: 16px; border-radius: 8px; background: #1c2227; color: #eceff1; border-left: 4px solid #455a64; }
+.ticket-long { border-left-color: #43a047; }
+.ticket-short { border-left-color: #e53935; }
+.ticket-no_trade { border-left-color: #757575; opacity: 0.85; }
+.ticket-header { display: flex; align-items: center; gap: 10px; }
+.ticket-header h3 { margin: 0; flex-grow: 1; font-size: 16px; }
+.ticket-badge { padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; letter-spacing: 0.5px; }
+.badge-long { background: #43a047; color: white; }
+.badge-short { background: #e53935; color: white; }
+.badge-no-trade { background: #616161; color: white; }
+.ticket-confidence { font-size: 11px; opacity: 0.7; }
+.ticket-leg, .ticket-rr { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px 12px; margin: 10px 0; font-size: 13px; }
+.ticket-leg div, .ticket-rr div { display: flex; justify-content: space-between; }
+.ticket-leg .lbl, .ticket-rr .lbl { opacity: 0.6; }
+.ticket-timing { font-size: 12px; opacity: 0.85; padding-top: 8px; border-top: 1px solid #37474f; }
+.ticket-blurb { font-size: 12px; margin-top: 10px; padding-top: 10px; border-top: 1px solid #37474f; opacity: 0.9; }
+.ticket-no-trade { font-style: italic; opacity: 0.75; }
 </style>
 {% endblock %}

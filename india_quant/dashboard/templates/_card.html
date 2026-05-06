@@ -1,0 +1,41 @@
+{# Trade-ticket card — one card per index. Phase 3a Task 6. #}
+<article class="ticket ticket-{{ card.direction.value }}">
+  <header class="ticket-header">
+    <h3 class="ticket-index">{{ card.index }}</h3>
+    {% if card.direction.value == "no_trade" %}
+      <span class="ticket-badge badge-no-trade">NO TRADE</span>
+    {% else %}
+      <span class="ticket-badge badge-{{ card.direction.value }}">{{ card.direction.value|upper }}</span>
+      <span class="ticket-confidence">conf {{ "%.0f"|format(card.confidence * 100) }}%</span>
+    {% endif %}
+  </header>
+
+  {% if card.direction.value == "no_trade" %}
+    <p class="ticket-no-trade">No trade — {{ card.reasoning.no_trade_reason_code|replace("_", " ") }}</p>
+  {% else %}
+    <section class="ticket-leg">
+      <div><span class="lbl">Strike</span><span>{{ "%.0f"|format(card.leg.strike) }} {{ card.leg.option_type }}</span></div>
+      <div><span class="lbl">Expiry</span><span>{{ card.leg.expiry.strftime("%d %b") }}</span></div>
+      <div><span class="lbl">Lots</span><span>{{ card.leg.lots }} × {{ card.leg.lot_size }}</span></div>
+      <div><span class="lbl">Premium</span><span>₹{{ "%.2f"|format(card.leg.premium_estimate) }}
+        <small>({{ "%.2f"|format(card.leg.premium_zone[0]) }}–{{ "%.2f"|format(card.leg.premium_zone[1]) }})</small></span></div>
+    </section>
+
+    <section class="ticket-rr">
+      <div><span class="lbl">Max loss</span><span>₹{{ "{:,.0f}".format(card.risk_reward.max_loss) }}</span></div>
+      <div><span class="lbl">Target T1</span><span>₹{{ "{:,.0f}".format(card.risk_reward.target_pnl_t1) }}</span></div>
+      <div><span class="lbl">Target T2</span><span>₹{{ "{:,.0f}".format(card.risk_reward.target_pnl_t2) }}</span></div>
+      <div><span class="lbl">EV</span><span>₹{{ "{:,.0f}".format(card.risk_reward.expected_value) }}</span></div>
+      <div><span class="lbl">R:R</span><span>{{ "%.2f"|format(card.risk_reward.risk_reward_ratio) }}×</span></div>
+      <div><span class="lbl">Win prob</span><span>{{ "%.0f"|format(card.risk_reward.win_probability * 100) }}%</span></div>
+    </section>
+
+    <section class="ticket-timing">
+      Entry {{ card.timing.entry_window_start.strftime("%H:%M") }}–{{ card.timing.entry_window_end.strftime("%H:%M") }}
+      · Exit {{ card.timing.exit_window_start.strftime("%H:%M") }}–{{ card.timing.exit_window_end.strftime("%H:%M") }}
+      · Invalidate {{ card.timing.invalidation_time.strftime("%H:%M") }}
+    </section>
+  {% endif %}
+
+  <p class="ticket-blurb">{{ card.blurb }}</p>
+</article>

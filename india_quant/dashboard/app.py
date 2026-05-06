@@ -138,42 +138,92 @@ def create_app() -> Flask:
     @app.route("/global")
     def global_context_page():
         from datetime import datetime, date as date_cls
+        import pandas as pd
+        from flask import request
         from india_quant.signals.global_context import get_global_context
         from india_quant.data.fetchers.gift_nifty_fetcher import fetch_gift_nifty_quote
-        from india_quant.global_tab.briefing import build_briefing
-        from india_quant.global_tab.correlation import build_heatmap
+        from india_quant.data.db import get_session_factory
         from india_quant.global_tab.heatmap_view import render_heatmap_html
+        from india_quant.global_tab.options_chain import load_chain_snapshot
+        from india_quant.global_tab.orchestrator import build_global_view
+        from india_quant.global_tab.types import Mode
+
+        # ── Validate query params ─────────────────────────────────────────
+        try:
+            capital = float(request.args.get("capital", "100000"))
+            if capital <= 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            return ("Bad capital — must be a positive number.", 400)
+
+        mode_str = request.args.get("mode", "balanced").lower()
+        try:
+            mode = Mode(mode_str)
+        except ValueError:
+            return (f"Bad mode {mode_str!r} — expected aggressive | balanced | conservative.", 400)
 
         as_of = datetime.now()
         warnings: list[str] = []
 
+        # ── Build providers ──────────────────────────────────────────────
+        def _ctx_provider():
+            try:
+                return get_global_context()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("global_context fetch failed: {}", exc)
+                warnings.append("Live global signals unavailable; tiles fall back to —")
+                return type("EmptyCtx", (), {"signals": []})()
+
+        def _gift_provider():
+            q = fetch_gift_nifty_quote()
+            if q is None:
+                warnings.append("GIFT Nifty source unreachable; tile shows —")
+            return q
+
+        def _history_provider():
+            try:
+                return ddata.load_global_history(lookback_days=120)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("heatmap history load failed: {}", exc)
+                warnings.append("Correlation heatmap unavailable; check DB connectivity")
+                return pd.DataFrame()
+
+        def _chain_loader(index, when, expiry):
+            try:
+                return load_chain_snapshot(
+                    index, when, expiry, session_factory=get_session_factory(),
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("chain load failed for {}: {}", index, exc)
+                return None
+
+        view = build_global_view(
+            as_of=as_of,
+            mode=mode,
+            capital=capital,
+            context_provider=_ctx_provider,
+            gift_provider=_gift_provider,
+            history_provider=_history_provider,
+            chain_loader=_chain_loader,
+        )
+
         try:
-            ctx = get_global_context()
-        except Exception as exc:
-            logger.warning("global_context fetch failed: {}", exc)
-            ctx = type("EmptyCtx", (), {"signals": []})()
-            warnings.append("Live global signals unavailable; tiles fall back to —")
-
-        gift = fetch_gift_nifty_quote()
-        if gift is None:
-            warnings.append("GIFT Nifty source unreachable; tile shows —")
-
-        briefing = build_briefing(as_of=as_of, context=ctx, gift_nifty=gift)
-
-        try:
-            history = ddata.load_global_history(lookback_days=120)
-            heatmap = build_heatmap(history=history, as_of=date_cls.today())
-            heatmap_html = render_heatmap_html(heatmap)
-        except Exception as exc:
-            logger.warning("heatmap build failed: {}", exc)
+            heatmap_html = render_heatmap_html(view.heatmap)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("heatmap render failed: {}", exc)
             heatmap_html = '<div class="heatmap-empty">Heatmap unavailable today.</div>'
-            warnings.append("Correlation heatmap unavailable; check DB connectivity")
+
+        if not view.cards or all(c.direction.value == "no_trade" for c in view.cards):
+            warnings.append("All cards NO_TRADE — check GIFT Nifty premium and chain coverage.")
 
         return render_template(
             "global_v2.html",
             as_of=as_of,
-            briefing=briefing,
+            briefing=view.briefing,
             heatmap_html=heatmap_html,
+            cards=view.cards,
+            mode=view.mode,
+            capital=view.capital,
             data_warnings=warnings,
         )
 
