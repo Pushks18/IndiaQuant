@@ -24,6 +24,7 @@ class ModeConfig:
     target_t2_multiple: float
     stop_loss_multiple: float    # SL = entry_premium * multiple (multiple < 1)
     require_top_decile_analog: bool
+    max_loss_fraction: float     # share of capital at risk per trade (Phase 3a)
 
 
 MODE_CONFIGS: dict[Mode, ModeConfig] = {
@@ -35,6 +36,7 @@ MODE_CONFIGS: dict[Mode, ModeConfig] = {
         target_t2_multiple=2.5,
         stop_loss_multiple=0.6,
         require_top_decile_analog=False,
+        max_loss_fraction=0.02,
     ),
     Mode.BALANCED: ModeConfig(
         min_expected_value=0.0,
@@ -44,6 +46,7 @@ MODE_CONFIGS: dict[Mode, ModeConfig] = {
         target_t2_multiple=2.0,
         stop_loss_multiple=0.7,
         require_top_decile_analog=False,
+        max_loss_fraction=0.015,
     ),
     Mode.CONSERVATIVE: ModeConfig(
         min_expected_value=0.0,
@@ -53,5 +56,6 @@ MODE_CONFIGS: dict[Mode, ModeConfig] = {
         target_t2_multiple=1.6,
         stop_loss_multiple=0.8,
         require_top_decile_analog=True,
+        max_loss_fraction=0.01,
     ),
 }
