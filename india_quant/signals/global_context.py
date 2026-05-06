@@ -55,6 +55,7 @@ GROUPS: dict[str, dict[str, str]] = {
     },
     "Commodities": {
         "CL=F": "Crude WTI",
+        "BZ=F":  "Brent",
         "GC=F":  "Gold",
         "NG=F":  "Natural Gas",
     },

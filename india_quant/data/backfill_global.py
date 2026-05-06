@@ -27,7 +27,7 @@ _RAW_GROUPS = {
     "Asia":        ["^N225", "^HSI", "^KS11", "^TWII", "^AXJO", "000001.SS",
                     "^CNXIT", "^NSEBANK", "^CNXINFRA", "^CNXPHARMA", "^CNXREALTY", "^CNXENERGY"],
     "FX":          ["USDINR=X", "DX-Y.NYB", "USDJPY=X", "^TNX", "^VIX"],
-    "Commodities": ["CL=F", "GC=F", "NG=F"],
+    "Commodities": ["CL=F", "BZ=F", "GC=F", "NG=F"],
 }
 
 ALL_TICKERS = [t for tickers in _RAW_GROUPS.values() for t in tickers]
