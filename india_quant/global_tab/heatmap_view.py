@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import plotly.graph_objects as go
 
+from india_quant.global_tab.correlation import COLUMN_TICKERS, ROW_TICKERS
 from india_quant.global_tab.types import CorrelationHeatmap
 
 
@@ -14,8 +15,12 @@ def render_heatmap_html(heatmap: CorrelationHeatmap) -> str:
     if not heatmap.cells:
         return '<div class="heatmap-empty">No correlation data available — —</div>'
 
-    rows = sorted({c.asset_a for c in heatmap.cells})
-    cols = sorted({c.asset_b for c in heatmap.cells})
+    # Preserve canonical order from correlation.py (NIFTY before BANKNIFTY,
+    # heatmap columns in spec-defined sequence) rather than alphabetical.
+    present_rows = {c.asset_a for c in heatmap.cells}
+    present_cols = {c.asset_b for c in heatmap.cells}
+    rows = [r for r in ROW_TICKERS if r in present_rows]
+    cols = [c for c in COLUMN_TICKERS if c in present_cols]
 
     z_20: list[list[float | None]] = [[None for _ in cols] for _ in rows]
     hover: list[list[str | None]] = [[None for _ in cols] for _ in rows]
