@@ -26,7 +26,7 @@ _RAW_GROUPS = {
     "Europe":      ["^GDAXI", "^FTSE"],
     "Asia":        ["^N225", "^HSI", "^KS11", "^TWII", "^AXJO", "000001.SS",
                     "^CNXIT", "^NSEBANK", "^CNXINFRA", "^CNXPHARMA", "^CNXREALTY", "^CNXENERGY"],
-    "FX":          ["USDINR=X", "DX-Y.NYB", "USDJPY=X", "^TNX", "^VIX"],
+    "FX":          ["USDINR=X", "DX-Y.NYB", "USDJPY=X", "^TNX", "^VIX", "^INDIAVIX"],
     "Commodities": ["CL=F", "BZ=F", "GC=F", "NG=F"],
 }
 

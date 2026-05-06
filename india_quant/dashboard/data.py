@@ -243,6 +243,10 @@ def load_global_history(lookback_days: int = 120) -> "pd.DataFrame":
     NIFTY (^NSEI) is absent from the global_signals table; only BANKNIFTY is
     available there, so the heatmap will only compute BANKNIFTY rows.
 
+    Phase-4 cut-over: replace this DB read with a parquet artifact load once
+    ``scripts/nightly_global.py`` writes ``data/artifacts/corr_YYYY-MM-DD.parquet``
+    per spec §5.1.
+
     Price values are reconstructed from cumulative daily % returns (pct_1d),
     anchored at 1.0, which yields valid log-return correlations.
 
@@ -262,7 +266,7 @@ def load_global_history(lookback_days: int = 120) -> "pd.DataFrame":
         "NASDAQ":    "^IXIC",
         "DXY":       "DX-Y.NYB",
         "BRENT":     "BZ=F",        # may not be in DB yet; graceful skip
-        "INDIA_VIX": "^VIX",
+        "INDIA_VIX": "^INDIAVIX",
         "US10Y":     "^TNX",
         "NIKKEI":    "^N225",
         "HSI":       "^HSI",
