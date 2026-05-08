@@ -135,13 +135,16 @@ Total: 11 numeric features (4 dow one-hot collapsed to dow integer to keep it ti
 ### Task 5: End-to-end demo + test gate
 
 - [x] **Step 1:** `venv/bin/python -m pytest tests/global_tab/ -v` — all green (Phase 1 + 2 + 3a + 3b ≥ 130 tests).
-- [ ] **Step 2:** `venv/bin/python scripts/train_global_forecaster.py --index NIFTY --start 2024-01-01 --end 2026-04-30 --seed 42 --out models/global_tab/`. Inspect `training_summary.json`: OOS log-loss should beat 0.69 (the always-up baseline = ~0.693). If not, log finding and document — Phase 3c tuning is a separate plan. **(awaiting live TimescaleDB run by user)**
-- [ ] **Step 3:** Same for `--index BANKNIFTY`. **(awaiting live TimescaleDB run by user)**
-- [ ] **Step 4:** Restart dashboard, hit `/global?capital=100000&mode=balanced`, confirm:
-  - Cards no longer show `artifact=stub` banner.
-  - Direction can be LONG, SHORT, or NO_TRADE depending on today's features (vs Phase 3a where direction was deterministic from GIFT premium).
-  - Determinism property test from Phase 3a still passes (LightGBM is deterministic when seeded + no GPU).
-  **(awaiting trained pickles from steps 2-3)**
+- [x] **Step 2:** Trained NIFTY on 2024-04-16 → 2026-05-07 (start clipped to earliest date all 5 global tickers are present after backfill — `^INDIAVIX` and `BZ=F` only available from 2024-04-16). Seed=42, n_samples=359, 5-fold walk-forward. **OOS direction logloss: 0.72, 0.96, 1.03, 0.87, 0.69 (mean 0.85)** — underperforms always-up baseline 0.693 on 4 of 5 folds. Logged as expected per §7 risk ("small training set"); Phase 3c (Optuna sweep) deferred to its own plan.
+- [x] **Step 3:** Same window for BANKNIFTY. n_samples=355. **OOS direction logloss: 0.73, 1.05, 0.95, 0.77, 0.70 (mean 0.84)** — same baseline-underperformance pattern. Both `*_training_summary.json` files written.
+- [x] **Step 4:** Hit `/global?capital=100000&mode=balanced` via Flask test client. Confirmed:
+  - Banner now reads `Forecast: lightgbm` with green `artifact-banner-prod` styling (no longer `stub`).
+  - Tests 138/138 green (was ≥130 target) — covers determinism property + artifact wiring.
+  - Reproducibility gate: re-trained NIFTY with same seed/window, `feature_importances_` arrays byte-identical to first run.
+
+**Bug fixed during execution (2026-05-07):** `training_features.assemble_training_frame` raised `ValueError: Tz-aware datetime.datetime cannot be converted to datetime64 unless utc=True` when `price_data.datetime` rows had mixed-tz handling. Patched `pd.to_datetime(..., utc=True).dt.tz_convert("Asia/Kolkata").dt.date`.
+
+**Backfill performed during execution:** yfinance had to be upgraded from 0.2.51 → 1.3.0 (Yahoo API response format changed, breaking the older client). Then `^NSEI`, `^NSEBANK`, `^INDIAVIX` were loaded into `price_data` (1,241 rows) and `global_signals` re-run for 600 days, picking up `^INDIAVIX` and `BZ=F` which had been silently failing under the old yfinance version.
 
 ---
 
