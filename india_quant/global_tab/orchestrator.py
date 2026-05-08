@@ -5,6 +5,7 @@ providers; tests pass deterministic stubs to verify byte-identical re-runs.
 """
 from __future__ import annotations
 
+import dataclasses
 from datetime import date, datetime
 from typing import Any, Callable, Optional
 
@@ -12,6 +13,7 @@ import pandas as pd
 
 from india_quant.data.fetchers.gift_nifty_fetcher import GiftNiftyQuote
 from india_quant.global_tab.analog_index import AnalogIndex, AnalogStats
+from india_quant.global_tab.live_status import compute_status
 from india_quant.global_tab.briefing import build_briefing
 from india_quant.global_tab.correlation import build_heatmap
 from india_quant.global_tab.forecaster import (
@@ -212,7 +214,9 @@ def build_global_view(
             analog_avg_pnl=stats.avg_return_bps,
             no_trade_reason_code=None,
         )
-        ticket = TradeTicket(
+        # Build the ticket first with WAITING so compute_status can read its
+        # timing window; then re-stamp with the time-derived status.
+        provisional = TradeTicket(
             index=index,
             direction=forecast.direction,
             confidence=forecast.confidence,
@@ -222,6 +226,11 @@ def build_global_view(
             reasoning=ctx,
             live=LiveTicket(status=Status.WAITING, live_pnl=None, last_update=as_of),
             blurb=blurb_for_ticket(ctx, forecast.direction, index, llm=llm),
+        )
+        live_status = compute_status(provisional, as_of)
+        ticket = dataclasses.replace(
+            provisional,
+            live=LiveTicket(status=live_status, live_pnl=None, last_update=as_of),
         )
         cards.append(ticket)
 
