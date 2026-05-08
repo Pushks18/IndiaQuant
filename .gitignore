@@ -17,6 +17,7 @@ models/*.pkl
 models/global_tab/*.pkl
 models/global_tab/*_training_summary.json
 optuna_global_tab.db
+optuna_global_tab_3d.db
 *.log
 
 # Editor / OS

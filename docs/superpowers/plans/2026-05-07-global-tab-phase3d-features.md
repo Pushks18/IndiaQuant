@@ -178,6 +178,46 @@ All as-of T-1 close (no future peek). Universe = Nifty-50 constituents present i
 
 ---
 
+## 5b. Live execution result (2026-05-07) — NEGATIVE
+
+Built the full infrastructure (helpers, FeatureRow optional fields, artifact `n_features_in_` guard, train-time zero-imputation for additive columns, orchestrator serve-time sector RS population) and ran the tuned sweep on the 20-column set (`iv_skew` + `oi_flow` dropped per §7 — both 100% NULL across 2021-2026 because `option_chain` is empty).
+
+| Metric            | NIFTY 3c (11 ft) → 3d (20 ft) | BANKNIFTY 3c (11 ft) → 3d (20 ft) |
+|-------------------|-------------------------------|-----------------------------------|
+| direction logloss | 0.675 → 0.681 (+0.9%)         | 0.684 → 0.692 (+1.2%)             |
+| pinball q50 (bps) | 29.84 → 29.87 (+0.1%)         | 35.38 → 35.43 (+0.1%)             |
+
+**Conclusion: the 9 new features did not improve OOS performance — slight regression on both indices.** The candidate features (sector RS, breadth, universe-mean realized vol) are all heavily correlated with NIFTY's own past returns, which the model already captures via `nifty_5d_momentum` and `nifty_realized_vol_20d`. No information-additive signal in this column set.
+
+### Decision: roll back FEATURE_COLUMNS, keep the infrastructure
+
+- `FEATURE_COLUMNS` reverted to the 11 Phase 3c columns. Production `/global` serves the better Phase 3c-quality model.
+- All Phase 3d helpers (`_sector_features`, `_breadth_features`, `_factor_aggregate_features`, `_nifty50_universe`) and `FeatureRow` optional fields **remain** — they are now reusable scaffolding for Phase 3e.
+- Candidate column list captured as `PHASE3D_CANDIDATE_COLUMNS` so a future opt-in is a one-line append.
+- Pickles retrained on the 11-feature set after the rollback. NIFTY logloss 0.674, BANKNIFTY 0.684 — within Phase 3c noise.
+
+### Acceptance criteria — final
+
+| # | Criterion                                                    | Result                                                          |
+|---|--------------------------------------------------------------|-----------------------------------------------------------------|
+| 1 | Magnitude q50 drops ≥ 15% on at least one index             | **FAILED** (0.1% on both — within noise; new features inert)    |
+| 2 | Direction logloss does not regress vs Phase 3c              | MET on the rollback (NIFTY 0.674, BANKNIFTY 0.684 — same as 3c) |
+| 3 | `FEATURE_COLUMNS` order preserved for the legacy 11         | MET (rolled back to 11; legacy order byte-identical)            |
+| 4 | Test count ≥ 150, all green                                 | MET (151/151)                                                   |
+| 5 | Back-compat: legacy 5-field FeatureRow construction works   | MET (covered by `test_back_compat_legacy_feature_row`)           |
+| 6 | Pickles + summary updated under `models/global_tab/`        | MET — 11-feature pickles after the rollback retrain             |
+
+### Phase 3e direction (refined by this negative result)
+
+The negative finding is the most useful output of Phase 3d. It rules out an entire class of follow-ups: any aggregate feature derivable from NSE close-of-day prices is unlikely to help, because the existing 11-feature set already encodes that information through NIFTY's own dynamics and the macro cross-sectionals (SPX/NDX/DXY/Brent/IndiaVIX).
+
+Phase 3e should look at **information sources the current model can't see**:
+1. **Sentiment** (FinBERT scores over news headlines) — orthogonal to price-based features. Requires backfilling `sentiment_aggregate` over 2021-2026.
+2. **Intraday flow** (e.g. opening-30-min volume vs prior session, RSI of NIFTY 5-min bars) — captures dealer-flow regime that EOD closes hide.
+3. **Options-implied surface** (put/call IV skew, ATM IV, term structure) once `option_chain` is logged forward — orthogonal to historical realized vol.
+
+---
+
 ## 8. Out of scope (Phase 3e candidates)
 
 - **Sentiment features.** `sentiment_aggregate` has 46 rows total as of 2026-05-07 — not viable. Phase 3e: backfill sentiment via the FinBERT pipeline over 2021-2026 news, then add `mean_sentiment_universe`, `sentiment_dispersion`, `news_volume_z`.
