@@ -57,12 +57,40 @@ def _build_features(context, gift_nifty: GiftNiftyQuote | None) -> FeatureRow:
         row = _row_by_ticker(rows, ticker)
         return getattr(row, "pct_1d", None) if row is not None else None
 
+    def _pct5(ticker: str) -> float | None:
+        row = _row_by_ticker(rows, ticker)
+        return getattr(row, "pct_5d", None) if row is not None else None
+
+    # Phase 3d: sector relative-strength + dispersion at serve time.
+    nifty_pct_5d = getattr(context, "nifty_pct_5d", None)
+    def _rs(ticker: str) -> float | None:
+        s = _pct5(ticker)
+        if s is None or nifty_pct_5d is None:
+            return None
+        return float(s) - float(nifty_pct_5d)
+
+    sector_disp: float | None = None
+    sector_pcts = [_pct5(t) for t in ("^NSEBANK", "^CNXIT", "^CNXPHARMA",
+                                       "^CNXREALTY", "^CNXENERGY", "^CNXINFRA")]
+    sector_clean = [float(v) for v in sector_pcts if v is not None]
+    if len(sector_clean) >= 4:
+        import numpy as _np
+        sector_disp = float(_np.std(sector_clean, ddof=0))
+
     return FeatureRow(
         gift_nifty_premium_bps=gift_bps,
         spx_overnight_pct=_pct(_FEAT_TICKERS["spx_overnight_pct"]),
         dxy_delta_pct=_pct(_FEAT_TICKERS["dxy_delta_pct"]),
         india_vix_delta_pct=_pct(_FEAT_TICKERS["india_vix_delta_pct"]),
         brent_overnight_pct=_pct(_FEAT_TICKERS["brent_overnight_pct"]),
+        bank_vs_nifty_5d_relstr=_rs("^NSEBANK"),
+        it_vs_nifty_5d_relstr=_rs("^CNXIT"),
+        pharma_vs_nifty_5d_relstr=_rs("^CNXPHARMA"),
+        realty_vs_nifty_5d_relstr=_rs("^CNXREALTY"),
+        sector_dispersion_5d=sector_disp,
+        # Breadth + factor-aggregate features stay None at serve time;
+        # artifact zero-imputes (Phase 3e: thread session_factory through orchestrator
+        # to populate them properly and close the train/serve skew).
     )
 
 

@@ -33,6 +33,16 @@ class FeatureRow:
     dow_int: int | None = None
     is_expiry_week: int | None = None
     days_to_rbi_policy: int | None = None
+    # Phase 3d additions — defaults to None for back-compat
+    bank_vs_nifty_5d_relstr: float | None = None
+    it_vs_nifty_5d_relstr: float | None = None
+    pharma_vs_nifty_5d_relstr: float | None = None
+    realty_vs_nifty_5d_relstr: float | None = None
+    sector_dispersion_5d: float | None = None
+    pct_above_20dma: float | None = None
+    pct_above_50dma: float | None = None
+    advance_decline_5d: float | None = None
+    mean_realized_vol_universe: float | None = None
 
     def as_dict(self) -> dict[str, float | None]:
         return {
@@ -47,6 +57,15 @@ class FeatureRow:
             "dow_int": self.dow_int,
             "is_expiry_week": self.is_expiry_week,
             "days_to_rbi_policy": self.days_to_rbi_policy,
+            "bank_vs_nifty_5d_relstr":   self.bank_vs_nifty_5d_relstr,
+            "it_vs_nifty_5d_relstr":     self.it_vs_nifty_5d_relstr,
+            "pharma_vs_nifty_5d_relstr": self.pharma_vs_nifty_5d_relstr,
+            "realty_vs_nifty_5d_relstr": self.realty_vs_nifty_5d_relstr,
+            "sector_dispersion_5d":      self.sector_dispersion_5d,
+            "pct_above_20dma":           self.pct_above_20dma,
+            "pct_above_50dma":           self.pct_above_50dma,
+            "advance_decline_5d":        self.advance_decline_5d,
+            "mean_realized_vol_universe": self.mean_realized_vol_universe,
         }
 
 

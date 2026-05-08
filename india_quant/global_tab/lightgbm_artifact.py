@@ -73,6 +73,16 @@ class LightGBMArtifact:
             raise ArtifactMissingError(
                 f"LightGBMArtifact: failed to load pickles for {index}: {exc}"
             ) from exc
+
+        # Guard against stale pickles trained on a smaller FEATURE_COLUMNS list.
+        expected = len(FEATURE_COLUMNS)
+        for kind, model in booster.items():
+            n_in = getattr(model, "n_features_in_", None)
+            if n_in is not None and n_in != expected:
+                raise ArtifactMissingError(
+                    f"LightGBMArtifact: {index}_{kind} pickle expects {n_in} features "
+                    f"but FEATURE_COLUMNS has {expected}; retrain required"
+                )
         self._cache[index] = booster
         return booster
 
