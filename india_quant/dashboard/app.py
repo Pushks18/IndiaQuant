@@ -312,6 +312,9 @@ def create_app() -> Flask:
             spot_provider=_spot_provider,
         )
 
+        from india_quant.global_tab.snapshot import write_view_snapshot
+        write_view_snapshot(view)
+
         try:
             heatmap_html = render_heatmap_html(view.heatmap)
         except Exception as exc:  # noqa: BLE001
@@ -397,6 +400,8 @@ def create_app() -> Flask:
             model_artifact=app.config.get("GLOBAL_TAB_ARTIFACT"),
             analog_index=app.config.get("GLOBAL_TAB_ANALOG_INDEX"),
         )
+        from india_quant.global_tab.snapshot import write_view_snapshot
+        write_view_snapshot(view)
 
         def _serialize_card(c):
             d = dataclasses.asdict(c)
