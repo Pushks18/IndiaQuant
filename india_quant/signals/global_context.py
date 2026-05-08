@@ -52,6 +52,7 @@ GROUPS: dict[str, dict[str, str]] = {
         "USDJPY=X":  "USD/JPY",
         "^TNX":      "US 10Y Yield",
         "^VIX":      "CBOE VIX",
+        "^INDIAVIX": "India VIX",
     },
     "Commodities": {
         "CL=F": "Crude WTI",

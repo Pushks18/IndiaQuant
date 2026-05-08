@@ -310,6 +310,7 @@ def create_app() -> Flask:
             model_artifact=app.config.get("GLOBAL_TAB_ARTIFACT"),
             analog_index=app.config.get("GLOBAL_TAB_ANALOG_INDEX"),
             spot_provider=_spot_provider,
+            nifty_closes_provider=lambda: ddata.nifty_recent_closes(25),
         )
 
         from india_quant.global_tab.snapshot import write_view_snapshot
@@ -399,6 +400,7 @@ def create_app() -> Flask:
             history_provider=_hist, chain_loader=_chain,
             model_artifact=app.config.get("GLOBAL_TAB_ARTIFACT"),
             analog_index=app.config.get("GLOBAL_TAB_ANALOG_INDEX"),
+            nifty_closes_provider=lambda: ddata.nifty_recent_closes(25),
         )
         from india_quant.global_tab.snapshot import write_view_snapshot
         write_view_snapshot(view)

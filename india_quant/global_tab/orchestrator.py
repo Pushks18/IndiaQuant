@@ -38,11 +38,50 @@ from india_quant.global_tab.types import (
 
 # Tickers we read from the GlobalContext to populate FeatureRow.
 _FEAT_TICKERS = {
-    "spx_overnight_pct": "^GSPC",
-    "dxy_delta_pct": "DX-Y.NYB",
-    "india_vix_delta_pct": "^INDIAVIX",
-    "brent_overnight_pct": "BZ=F",
+    "spx_overnight_pct":    "^GSPC",
+    "nasdaq_overnight_pct": "^IXIC",
+    "dxy_delta_pct":        "DX-Y.NYB",
+    "india_vix_delta_pct":  "^INDIAVIX",
+    "brent_overnight_pct":  "BZ=F",
 }
+
+# RBI policy dates — duplicated from training_features so orchestrator
+# stays free of training-side imports. Update both lists together.
+_RBI_POLICY_DATES_FOR_SERVE = (
+    date(2025, 2, 7),  date(2025, 4, 9),  date(2025, 6, 6),
+    date(2025, 8, 8),  date(2025, 10, 8), date(2025, 12, 5),
+    date(2026, 2, 6),  date(2026, 4, 8),  date(2026, 6, 5),
+    date(2026, 8, 7),  date(2026, 10, 7), date(2026, 12, 4),
+)
+
+
+def _days_to_next_rbi_policy(d: date) -> int:
+    upcoming = [p for p in _RBI_POLICY_DATES_FOR_SERVE if p >= d]
+    return (upcoming[0] - d).days if upcoming else 999
+
+
+def _nifty_momentum_and_vol(closes: list[float]) -> tuple[float | None, float | None]:
+    """Compute (nifty_5d_momentum, nifty_realized_vol_20d) from oldest-first closes.
+
+    Matches the training-time computation in training_features.assemble_training_frame:
+      momentum = log(close[-1]) - log(close[-6])     (5-session log return)
+      vol      = std(diff(log(close)))[-20:]         (20-session log-return std)
+    """
+    import math
+    if not closes or len(closes) < 6:
+        return (None, None)
+    c = [float(x) for x in closes if x and x > 0]
+    if len(c) < 6:
+        return (None, None)
+    momentum = math.log(c[-1]) - math.log(c[-6])
+    vol = None
+    if len(c) >= 21:
+        log_rets = [math.log(c[i]) - math.log(c[i - 1]) for i in range(1, len(c))]
+        tail = log_rets[-20:]
+        m = sum(tail) / len(tail)
+        var = sum((r - m) ** 2 for r in tail) / len(tail)
+        vol = var ** 0.5
+    return (momentum, vol)
 
 
 def _row_by_ticker(rows, ticker):
@@ -52,7 +91,13 @@ def _row_by_ticker(rows, ticker):
     return None
 
 
-def _build_features(context, gift_nifty: GiftNiftyQuote | None) -> FeatureRow:
+def _build_features(
+    context,
+    gift_nifty: GiftNiftyQuote | None,
+    *,
+    as_of: datetime | None = None,
+    nifty_closes: list[float] | None = None,
+) -> FeatureRow:
     rows = list(getattr(context, "signals", []) or [])
     gift_bps = (gift_nifty.change_pct * 100.0) if (gift_nifty and gift_nifty.change_pct is not None) else None
 
@@ -80,20 +125,35 @@ def _build_features(context, gift_nifty: GiftNiftyQuote | None) -> FeatureRow:
         import numpy as _np
         sector_disp = float(_np.std(sector_clean, ddof=0))
 
+    # Phase 5c: serve-time train/serve-skew fix. Populate the 6 fields the
+    # original Phase 3a orchestrator left at None so the LightGBM input
+    # vector matches the train-time distribution.
+    momentum, vol_20d = _nifty_momentum_and_vol(nifty_closes or [])
+    serve_date = (as_of.date() if isinstance(as_of, datetime) else date.today())
+    dow_int_v = serve_date.weekday()  # Mon=0..Sun=6; matches training trainer
+    is_expiry_v = 1                   # placeholder matches training (always 1 Mon..Fri)
+    days_to_rbi = _days_to_next_rbi_policy(serve_date)
+
     return FeatureRow(
         gift_nifty_premium_bps=gift_bps,
         spx_overnight_pct=_pct(_FEAT_TICKERS["spx_overnight_pct"]),
+        nasdaq_overnight_pct=_pct(_FEAT_TICKERS["nasdaq_overnight_pct"]),
         dxy_delta_pct=_pct(_FEAT_TICKERS["dxy_delta_pct"]),
         india_vix_delta_pct=_pct(_FEAT_TICKERS["india_vix_delta_pct"]),
         brent_overnight_pct=_pct(_FEAT_TICKERS["brent_overnight_pct"]),
+        nifty_5d_momentum=momentum,
+        nifty_realized_vol_20d=vol_20d,
+        dow_int=dow_int_v,
+        is_expiry_week=is_expiry_v,
+        days_to_rbi_policy=days_to_rbi,
         bank_vs_nifty_5d_relstr=_rs("^NSEBANK"),
         it_vs_nifty_5d_relstr=_rs("^CNXIT"),
         pharma_vs_nifty_5d_relstr=_rs("^CNXPHARMA"),
         realty_vs_nifty_5d_relstr=_rs("^CNXREALTY"),
         sector_dispersion_5d=sector_disp,
         # Breadth + factor-aggregate features stay None at serve time;
-        # artifact zero-imputes (Phase 3e: thread session_factory through orchestrator
-        # to populate them properly and close the train/serve skew).
+        # artifact zero-imputes (Phase 3e candidate columns weren't shown to
+        # be information-additive — see PHASE3D_CANDIDATE_COLUMNS).
     )
 
 
@@ -144,6 +204,7 @@ def build_global_view(
     model_artifact: ModelArtifact | None = None,
     analog_index: AnalogIndex | None = None,
     spot_provider: Callable[[str], Optional[float]] | None = None,
+    nifty_closes_provider: Callable[[], list[float]] | None = None,
     llm: Any | None = None,
     indices: tuple[str, ...] = ("NIFTY", "BANKNIFTY"),
 ) -> GlobalTabView:
@@ -156,7 +217,8 @@ def build_global_view(
     history = history_provider()
     heatmap = build_heatmap(history=history, as_of=as_of.date())
 
-    features = _build_features(context, gift)
+    nifty_closes = nifty_closes_provider() if nifty_closes_provider is not None else []
+    features = _build_features(context, gift, as_of=as_of, nifty_closes=nifty_closes)
     expiry = next_weekly_expiry(as_of.date())
 
     cards: list[TradeTicket] = []

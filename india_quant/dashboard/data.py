@@ -32,6 +32,19 @@ def latest_index_close(index: str) -> float | None:
     return float(row[0]) if row and row[0] is not None else None
 
 
+def nifty_recent_closes(n_days: int = 25) -> list[float]:
+    """Latest `n_days` ^NSEI EOD closes, oldest-first. Empty list on miss."""
+    with get_session() as s:
+        rows = s.execute(text(
+            "SELECT close FROM price_data "
+            "WHERE ticker = '^NSEI' AND interval = '1d' "
+            "ORDER BY datetime DESC LIMIT :n"
+        ), {"n": int(n_days)}).fetchall()
+    closes = [float(r[0]) for r in rows if r[0] is not None]
+    closes.reverse()  # oldest first
+    return closes
+
+
 def macro_snapshot() -> dict:
     """Quick macro card from yfinance — cached lightly inside the call."""
     try:
