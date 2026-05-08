@@ -118,6 +118,20 @@ External sources → Fetchers → PostgreSQL/TimescaleDB
 - `engine.py` — `IndiaBacktestEngine`: India-specific cost model (STT, brokerage, SEBI charges), walk-forward backtest, Sharpe/Sortino/Calmar/max-drawdown metrics
 - `validation.py` — Harvey-Liu-Zhu t-stat gate (threshold 3.0), McLean-Pontiff decay monitor
 
+**Layer 4b — Global Tab (`india_quant/global_tab/`)** — pre-open options forecaster for NIFTY / BANKNIFTY weekly expiry. Wired into the dashboard at `/global` and `/api/global/cards.json`.
+- `training_features.py` — `assemble_training_frame(index, start, end, *, session_factory)` builds the feature/label matrix from `global_signals` + `price_data`. `FEATURE_COLUMNS` is the canonical 11-column list; `PHASE3D_CANDIDATE_COLUMNS` tracks 9 sector/breadth/factor-aggregate features that were tested and found non-additive (kept as scaffolding for Phase 3e). The first 11 columns and their order are preserved across all phases so old reproducibility gates and pickled boosters keep working.
+- `lightgbm_artifact.py` — `LightGBMArtifact` implements the `ModelArtifact` protocol; lazy-loads four pickles per index (`{INDEX}_direction.pkl` + `{INDEX}_magnitude_q{10,50,90}.pkl`) and validates `booster.n_features_in_ == len(FEATURE_COLUMNS)` at load time so stale pickles fall back to `StubArtifact` rather than serving silently-wrong predictions.
+- `tuning.py` — `OptunaSweep` wraps walk-forward CV over 8 hyperparameters (TPE + median pruner). Used by `scripts/train_global_forecaster.py --tune`. Untuned path stays byte-identical for back-compat.
+- `analog_index.py` — `AnalogIndex` builds an in-memory cosine-similarity KNN over the same training-features frame. `idx.lookup(features, predicted_direction, k=20)` returns `AnalogStats(count, winrate, avg_return_bps, top_decile_match)`. SHORT predictions flip the signed avg return. Persisted via joblib at `models/global_tab/analog_index.pkl`; rebuild with `scripts/rebuild_analog_index.py`.
+- `live_status.py` — `compute_status(ticket, now, current_spot=None)` is the pure transition function. Time-only flips: WAITING → ENTRY_ZONE_ACTIVE → IN_POSITION → EXPIRED_NO_ENTRY. With `current_spot`, post-entry adds TARGET_HIT / STOPPED_OUT (direction-aware vs `leg.underlying_target_t1` / `underlying_stop_trigger`).
+- `orchestrator.py` — `build_global_view(...)` is the top-level pure assembler. Takes provider callables (`context_provider`, `gift_provider`, `history_provider`, `chain_loader`, `spot_provider`) plus `model_artifact` and `analog_index`. Conservative mode rejects trades when `AnalogStats.top_decile_match` is False (`no_top_decile_analog` reason).
+- `briefing.py`, `correlation.py`, `heatmap_view.py` — top-strip tile builder, correlation-matrix builder, Plotly HTML renderer.
+- `options_chain.py`, `options_sizer.py`, `forecaster.py`, `narrator.py`, `instruments.py`, `modes.py`, `types.py` — supporting modules for the spec-defined ticket pipeline.
+
+**Training scripts** (under `scripts/`):
+- `train_global_forecaster.py --index NIFTY --start 2021-01-01 --end <today> --seed 42 --tune --n-trials 30 --tune-storage sqlite:///optuna_global_tab.db --out models/global_tab/` — trains all 4 boosters per index, writes `{INDEX}_training_summary.json` with fold metrics and (when `--tune`) Optuna best-params. Models gitignored under `models/global_tab/`.
+- `rebuild_analog_index.py` — refreshes `models/global_tab/analog_index.pkl`. Run nightly after the EOD fetch.
+
 **Layer 5 — Reports (`india_quant/reports/`)**
 - `daily_report.py`, `weekly_report.py`, `monthly_report.py` — Jinja2 HTML → WeasyPrint PDF
 - `telegram_bot.py` — `TelegramNotifier`: send reports/alerts; gracefully no-ops if `TELEGRAM_BOT_TOKEN` is unset
