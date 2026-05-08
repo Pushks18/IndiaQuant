@@ -108,10 +108,12 @@ def test_build_view_returns_two_cards():
         history_provider=_history_provider(),
         chain_loader=_chain_loader_factory(),
     )
-    assert len(view.cards) == 2
-    assert {c.index for c in view.cards} == {"NIFTY", "BANKNIFTY"}
-    # GIFT premium 45 bps > 20 → LONG
-    assert all(c.direction == Direction.LONG for c in view.cards)
+    # Phase 6a: each index now contributes 2 cards — one directional, one straddle.
+    assert len(view.cards) == 4
+    directional = [c for c in view.cards if c.kind == "directional"]
+    assert {c.index for c in directional} == {"NIFTY", "BANKNIFTY"}
+    # GIFT premium 45 bps > 20 → directional cards are LONG
+    assert all(c.direction == Direction.LONG for c in directional)
 
 
 def test_no_trade_card_when_premium_within_band():
@@ -123,7 +125,8 @@ def test_no_trade_card_when_premium_within_band():
         history_provider=_history_provider(),
         chain_loader=_chain_loader_factory(),
     )
-    for c in view.cards:
+    directional = [c for c in view.cards if c.kind == "directional"]
+    for c in directional:
         assert c.direction == Direction.NO_TRADE
         assert c.leg is None
         assert c.reasoning.no_trade_reason_code == "no_overnight_catalyst"
@@ -199,11 +202,12 @@ def test_conservative_mode_blocks_when_no_top_decile_analog():
         chain_loader=_chain_loader_factory(),
         analog_index=_StubAnalog(),
     )
-    # Conservative gates on top-decile analog → all NO_TRADE
-    assert all(c.direction == Direction.NO_TRADE for c in view.cards)
+    # Conservative gates on top-decile analog → all directional cards are NO_TRADE
+    directional = [c for c in view.cards if c.kind == "directional"]
+    assert all(c.direction == Direction.NO_TRADE for c in directional)
     assert all(
         c.reasoning.no_trade_reason_code == "no_top_decile_analog"
-        for c in view.cards
+        for c in directional
     )
 
 

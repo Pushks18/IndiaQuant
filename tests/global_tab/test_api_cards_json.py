@@ -29,9 +29,12 @@ def test_response_shape(client):
     assert "artifact" in payload
     assert "cards" in payload and isinstance(payload["cards"], list)
     # Should always emit one card per index
-    assert len(payload["cards"]) == 2
+    # Phase 6a: 2 cards per index (directional + straddle).
+    assert len(payload["cards"]) == 4
     indices = {c["index"] for c in payload["cards"]}
     assert indices == {"NIFTY", "BANKNIFTY"}
+    kinds = {c["kind"] for c in payload["cards"]}
+    assert kinds == {"directional", "straddle"}
 
 
 def test_card_serialization_includes_required_keys(client):
