@@ -74,7 +74,7 @@ _DISPERSION_TICKERS: tuple[str, ...] = (
     "^CNXENERGY", "^CNXINFRA",
 )
 
-LABEL_COLUMNS: list[str] = ["label_direction", "label_return_bps"]
+LABEL_COLUMNS: list[str] = ["label_direction", "label_return_bps", "label_realized_vol_5d_pct"]
 
 _GLOBAL_TICKERS: dict[str, str] = {
     "^GSPC":      "spx_overnight_pct",
@@ -413,6 +413,25 @@ def assemble_training_frame(
         ret_bps = (np.log(next_close) - np.log(today_close)) * 10_000.0
         feat["label_return_bps"] = ret_bps
         feat["label_direction"] = 1 if ret_bps > 0 else 0
+
+        # Phase 6b label: forward 5-day realized vol (annualized %).
+        # std of next 5 log returns × √252 × 100. Drop the row if we don't
+        # have 5 forward sessions available.
+        if len(future_dates) >= 5:
+            forward_closes = [today_close] + [
+                float(px_df.loc[future_dates[i], "close"]) for i in range(5)
+            ]
+            forward_log_rets = [
+                np.log(forward_closes[i + 1]) - np.log(forward_closes[i])
+                for i in range(5)
+            ]
+            mean_r = sum(forward_log_rets) / len(forward_log_rets)
+            var_r = sum((r - mean_r) ** 2 for r in forward_log_rets) / len(forward_log_rets)
+            sigma_d = float(np.sqrt(var_r))
+            feat["label_realized_vol_5d_pct"] = sigma_d * np.sqrt(252.0) * 100.0
+        else:
+            feat["label_realized_vol_5d_pct"] = np.nan
+
         feat["__session_date"] = sd
         rows.append(feat)
 
