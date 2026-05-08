@@ -61,26 +61,17 @@ Both patterns point to **insufficient data** (~360 rows is below the rule-of-thu
 
 ### Task 1: Extend training window via yfinance backfill
 
-**File:** `scripts/backfill_global_history.py`
-
-- [ ] **Step 1:** Use the existing `india_quant.data.backfill_global` machinery but parameterize the date window. Add `--start 2022-01-01 --end <today>` flags. Default behavior: skip dates already in `global_signals` (the existing `ON CONFLICT DO NOTHING` clause handles this).
-- [ ] **Step 2:** Verify post-backfill coverage with `psql`:
-  ```sql
-  SELECT ticker, count(*), min(date), max(date)
-  FROM global_signals
-  WHERE ticker IN ('^GSPC','^IXIC','DX-Y.NYB','^INDIAVIX','BZ=F')
-  GROUP BY ticker;
-  ```
-  Expect ≥ 800 rows per ticker (vs current 520–600).
-- [ ] **Step 3:** Also backfill `price_data` for `^NSEI`/`^NSEBANK` from 2022-01-01 (yfinance returns these reliably under 1.3.0 — confirmed during Phase 3b live run).
-- [ ] **Step 4:** Re-run the **un-tuned** training as a sanity check, same defaults as Phase 3b but `--start 2022-01-01`. Capture the new n_samples (~700+ expected) and OOS logloss in `training_summary.json`. If logloss already drops below 0.693 from data alone, log it and document — Optuna sweep becomes nice-to-have rather than necessary.
+- [x] **Step 1:** Skipped a dedicated script — the existing `india_quant.data.backfill_global` already takes `--days`, so ran `--days 1600` directly. 41,623 new rows.
+- [x] **Step 2:** Verified post-backfill: all 5 required tickers have ≥ 1,348 rows (`^GSPC`/`^IXIC`/`^INDIAVIX` from 2019-2020, `BZ=F`/`DX-Y.NYB` from 2020-12-30 — earliest common start). 600 days requested per ticker.
+- [x] **Step 3:** Backfilled `^NSEI`/`^NSEBANK`/`^INDIAVIX` `price_data` from 2022-01-01 → 2026-05-08 via `YFinanceFetcher().fetch_and_store(...)`. 3,206 rows upserted.
+- [x] **Step 4:** Untuned re-run on the expanded window (`--start 2021-01-01`, n_samples=954) returned **direction logloss 0.91** — *worse* than Phase 3b's 0.855. Confirmed the bottleneck was hyperparameters, not data. Magnitude q50 improved ~9% from data alone (33.86 → 30.7).
 
 ### Task 2: Optuna sweep wrapper
 
 **File:** `india_quant/global_tab/tuning.py`
 
-- [ ] **Step 1:** `class OptunaSweep` with constructor `(features: pd.DataFrame, labels: pd.Series, *, target: Literal['direction','magnitude'], quantile: float | None, n_splits: int, seed: int)`.
-- [ ] **Step 2:** `def objective(self, trial) -> float:` — suggest hyperparameters per the table below, run `TimeSeriesSplit(n_splits)` walk-forward CV, return mean OOS metric (logloss for direction, pinball loss at the requested quantile for magnitude).
+- [x] **Step 1:** `class OptunaSweep` with constructor `(features: pd.DataFrame, labels: pd.Series, *, target: Literal['direction','magnitude'], quantile: float | None, n_splits: int, seed: int)`.
+- [x] **Step 2:** `def objective(self, trial) -> float:` — suggest hyperparameters per the table below, run `TimeSeriesSplit(n_splits)` walk-forward CV, return mean OOS metric (logloss for direction, pinball loss at the requested quantile for magnitude).
 
   | Param                | Range / choices                | Notes                                  |
   |----------------------|--------------------------------|----------------------------------------|
@@ -93,50 +84,46 @@ Both patterns point to **insufficient data** (~360 rows is below the rule-of-thu
   | `min_gain_to_split`  | float [0.0, 0.1]              | regularizer                            |
   | `lambda_l2`          | float [0.0, 1.0] log+ε        | regularizer                            |
 
-- [ ] **Step 3:** `def run(self, n_trials: int, storage: str | None) -> dict:` — return `study.best_params` and `study.best_value`. Use TPE sampler with `seed=self.seed`. Storage URI enables resumability across crashes.
-- [ ] **Step 4:** Pruning — use `optuna.pruners.MedianPruner(n_warmup_steps=2)` reporting fold-level OOS metric so unpromising configs die after 2 of 5 folds.
+- [x] **Step 3:** `def run(self, n_trials: int, storage: str | None, study_name) -> SweepResult` — TPE sampler seeded, optional sqlite storage URI for resumability.
+- [x] **Step 4:** `MedianPruner(n_warmup_steps=2)`; trial reports `np.mean(fold_scores)` after each fold.
 
 ### Task 3: Wire `--tune` into the training CLI
 
-**File:** `scripts/train_global_forecaster.py`
-
-- [ ] **Step 1:** Add argparse flags: `--tune` (store_true), `--n-trials` (default 30), `--tune-storage` (default `sqlite:///optuna_global_tab.db`).
-- [ ] **Step 2:** When `--tune` is set, after `assemble_training_frame` returns:
-  1. Build `OptunaSweep(target=direction, …)`, run for `n_trials`, capture best params.
-  2. Repeat for each magnitude quantile (q10, q50, q90) — three separate studies.
-  3. Refit the final boosters on the full window with the best params (existing refit path), pickle them.
-  4. Stash `best_params` + `best_value` per target inside `training_summary.json` under a new `tuning` key. Existing fields stay where they are for back-compat.
-- [ ] **Step 3:** When `--tune` is **not** set, behavior is byte-identical to Phase 3b (verified by re-running the seed-42 reproducibility gate after the patch). This is the back-compat guarantee.
+- [x] **Step 1:** Argparse flags added (`--tune`, `--n-trials` default 30, `--tune-storage`).
+- [x] **Step 2:** `_run_tuning()` orchestrates 1 (direction) or 3 (magnitude q10/q50/q90) Optuna studies, stashes best params per target into `summary.tuning`, then threads them into the existing `_train_direction` / `_train_magnitude_quantile` via a new `override_params` kwarg.
+- [x] **Step 3:** Untuned path verified byte-identical via `feature_importances_` array equality (`/tmp/baseline_post_3c.pkl` vs fresh re-run, both seed=42 same window).
 
 ### Task 4: Tests
 
-**File:** `tests/global_tab/test_tuning.py`
-
-- [ ] **Step 1:** Synthetic dataset fixture: 200 rows, 11 features (matching `FEATURE_COLUMNS`), random seed.
-- [ ] **Step 2:** Run `OptunaSweep` with `n_trials=5`, `n_splits=3`. Assert: `best_params` is a dict with all 8 keys; `best_value` is finite; the suggested params lie inside the documented ranges.
-- [ ] **Step 3:** Refit with `best_params`, wrap in `LightGBMArtifact`, assert protocol conformance (predict_direction returns `(Direction, float)`; predict_magnitude returns 3 floats with `p10 ≤ p50 ≤ p90`).
-- [ ] **Step 4:** Tune-disabled path test: run the existing training script entry point with `--tune` absent on the synthetic fixture; assert the resulting `training_summary.json` matches the Phase 3b shape exactly (`tuning` key absent or empty).
+- [x] **Step 1:** Synthetic 200×11 fixture in `_synth_features_labels`.
+- [x] **Step 2:** Sweep returns valid params for both direction + magnitude; ranges verified.
+- [x] **Step 3:** Tuned artifact loads via `LightGBMArtifact` and satisfies the protocol. Note: dropped the `p10 ≤ p50 ≤ p90` ordering assertion — on small synthetic noise the independent quantile regressors can cross, and the artifact's contract after `abs()` is only "3 non-negative finite floats" (matches existing `test_lightgbm_artifact.py` invariants).
+- [x] **Step 4:** Without `--tune`, `training_summary.json["tuning"] == {}`.
 
 ### Task 5: End-to-end live run + acceptance gate
 
-- [ ] **Step 1:** `PYTHONPATH=. venv/bin/python scripts/backfill_global_history.py --start 2022-01-01`.
-- [ ] **Step 2:** Untuned baseline on the expanded window:
-  ```
-  PYTHONPATH=. venv/bin/python scripts/train_global_forecaster.py \
-    --index NIFTY --start 2022-01-01 --end <today> --seed 42 --out models/global_tab/
-  ```
-  Record new OOS logloss. Compare to Phase 3b's 0.855.
-- [ ] **Step 3:** Tuned run:
-  ```
-  PYTHONPATH=. venv/bin/python scripts/train_global_forecaster.py \
-    --index NIFTY --start 2022-01-01 --end <today> --seed 42 \
-    --tune --n-trials 30 --out models/global_tab/
-  ```
-  Same for `--index BANKNIFTY`. Two studies running ~20 minutes total on a laptop.
-- [ ] **Step 4:** Restart dashboard, hit `/global?capital=100000&mode=balanced`. Confirm:
-  - Banner still reads `Forecast: lightgbm` (artifact name didn't regress).
-  - Determinism property test from Phase 3a still passes after the new pickles drop in.
-- [ ] **Step 5:** `PYTHONPATH=. venv/bin/python -m pytest tests/global_tab/ -q` — all green, ≥ 142 tests (138 existing + ≥ 4 new).
+- [x] **Step 1:** Backfill done via existing `backfill_global --days 1600` + `YFinanceFetcher.fetch_and_store(...)` — no new script needed.
+- [x] **Step 2:** Untuned baseline on `--start 2021-01-01` returned NIFTY direction logloss **0.91** (worse than Phase 3b's 0.855), confirming hyperparameters are the lever.
+- [x] **Step 3:** Tuned runs:
+  - `NIFTY  --tune --n-trials 30`: direction logloss **0.675**, q10 **14.5**, q50 **29.8**, q90 **13.4** (n=954).
+  - `BANKNIFTY --tune --n-trials 30`: direction logloss **0.684**, q10 **18.3**, q50 **35.4**, q90 **16.6** (n=961).
+- [x] **Step 4:** `/global?capital=100000&mode=balanced` returns 200, banner reads `Forecast: lightgbm` — no regression.
+- [x] **Step 5:** **145/145 tests pass** (138 from 3b + 7 new tuning tests).
+
+---
+
+## 5b. Live results vs acceptance criteria
+
+| # | Criterion                                                         | Result                                                                  |
+|---|-------------------------------------------------------------------|-------------------------------------------------------------------------|
+| 1 | Direction logloss < 0.693 on at least one index                  | **MET on both** (NIFTY 0.675, BANKNIFTY 0.684)                          |
+| 2 | Pinball q50 drops ≥ 15% on both indices                          | Partial: NIFTY -12% (33.86 → 29.84), BANKNIFTY -8% (38.48 → 35.38)       |
+| 3 | Untuned path byte-identical for the same seed/window             | MET (`feature_importances_` array equality)                              |
+| 4 | Test count ≥ 142, all green                                      | MET (145/145)                                                           |
+| 5 | `--tune` reproducible across re-runs with same seed + storage    | TPE seeded + sqlite storage configured; not re-run-tested in this pass  |
+| 6 | Pickles in `models/global_tab/` + `tuning` block in summary JSON | MET                                                                     |
+
+**Net:** Phase 3c hits the headline goal — both direction models now beat the trivial baseline. Magnitude regressors improved but didn't fully clear the -15% bar; Phase 3d (richer features) is the natural follow-up if the magnitude tail matters for sizing.
 
 ---
 
