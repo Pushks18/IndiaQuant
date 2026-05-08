@@ -4,13 +4,29 @@ Run:
   python -m india_quant.dashboard.app          # serve on http://localhost:5050
   python main.py --dashboard                   # same, via main entrypoint
 """
+import dataclasses
 import threading
-from datetime import date, datetime
+from datetime import date, datetime, time as dtime
+from enum import Enum
 
+import pandas as pd
 from flask import Flask, jsonify, render_template, request, redirect, url_for
 from loguru import logger
 
 from india_quant.dashboard import data as ddata
+
+
+def _coerce_json(obj):
+    """Recursively turn dataclass-asdict output into JSON-serialisable types."""
+    if isinstance(obj, dict):
+        return {k: _coerce_json(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_coerce_json(v) for v in obj]
+    if isinstance(obj, Enum):
+        return obj.value
+    if isinstance(obj, (datetime, date, dtime)):
+        return obj.isoformat()
+    return obj
 
 
 def _build_default_artifact():
@@ -307,6 +323,84 @@ def create_app() -> Flask:
             data_warnings=warnings,
             artifact_name=view.artifact_paths.get("name", "stub"),
         )
+
+    @app.route("/api/global/cards.json")
+    def api_global_cards():
+        """JSON view of the same cards rendered at /global. Lets downstream
+        consumers (Telegram bot, alert webhooks, custom dashboards) read the
+        current trade-ticket state without parsing HTML.
+
+        Query params: same as /global (mode, capital). Returns:
+          {"as_of": ISO8601, "mode": "...", "capital": float, "cards": [...]}
+        Each card includes index, direction, confidence, leg (or null),
+        timing (or null), risk_reward, reasoning, live status, blurb.
+        """
+        from datetime import datetime as _dt
+        from flask import jsonify, request
+        from india_quant.signals.global_context import get_global_context
+        from india_quant.data.fetchers.gift_nifty_fetcher import fetch_gift_nifty_quote
+        from india_quant.data.db import get_session_factory
+        from india_quant.global_tab.options_chain import load_chain_snapshot
+        from india_quant.global_tab.orchestrator import build_global_view
+        from india_quant.global_tab.types import Mode
+
+        try:
+            capital = float(request.args.get("capital", "100000"))
+            if capital <= 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            return jsonify({"error": "bad capital"}), 400
+        try:
+            mode = Mode(request.args.get("mode", "balanced").lower())
+        except ValueError:
+            return jsonify({"error": "bad mode"}), 400
+
+        def _ctx():
+            try:
+                return get_global_context()
+            except Exception:  # noqa: BLE001
+                return type("EmptyCtx", (), {"signals": []})()
+
+        def _gift():
+            try:
+                return fetch_gift_nifty_quote()
+            except Exception:  # noqa: BLE001
+                return None
+
+        def _hist():
+            try:
+                return ddata.load_global_history(lookback_days=120)
+            except Exception:  # noqa: BLE001
+                return pd.DataFrame()
+
+        def _chain(index, when, expiry):
+            try:
+                return load_chain_snapshot(
+                    index, when, expiry, session_factory=get_session_factory(),
+                )
+            except Exception:  # noqa: BLE001
+                return None
+
+        view = build_global_view(
+            as_of=_dt.now(), mode=mode, capital=capital,
+            context_provider=_ctx, gift_provider=_gift,
+            history_provider=_hist, chain_loader=_chain,
+            model_artifact=app.config.get("GLOBAL_TAB_ARTIFACT"),
+            analog_index=app.config.get("GLOBAL_TAB_ANALOG_INDEX"),
+        )
+
+        def _serialize_card(c):
+            d = dataclasses.asdict(c)
+            # Coerce non-JSON-native types
+            return _coerce_json(d)
+
+        return jsonify({
+            "as_of": view.as_of.isoformat(),
+            "mode": view.mode.value,
+            "capital": view.capital,
+            "artifact": view.artifact_paths.get("name", "stub"),
+            "cards": [_serialize_card(c) for c in view.cards],
+        })
 
     @app.route("/debates")
     def debates():
