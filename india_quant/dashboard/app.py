@@ -13,12 +13,40 @@ from loguru import logger
 from india_quant.dashboard import data as ddata
 
 
+def _build_default_artifact():
+    """Construct the production LightGBMArtifact, or a StubArtifact fallback.
+
+    Module-scope at app-init: if `models/global_tab/` is missing or any
+    NIFTY pickle is unreadable, we log a warning and serve via Stub. The
+    /global route then renders an "artifact: stub" banner so the user
+    knows they're seeing a degraded forecast.
+    """
+    from pathlib import Path
+    from india_quant.global_tab.forecaster import StubArtifact
+    from india_quant.global_tab.lightgbm_artifact import LightGBMArtifact
+
+    models_dir = Path("models/global_tab")
+    required = ["NIFTY_direction.pkl", "NIFTY_magnitude_q10.pkl",
+                "NIFTY_magnitude_q50.pkl", "NIFTY_magnitude_q90.pkl"]
+    if not all((models_dir / f).exists() for f in required):
+        logger.warning(
+            "global_tab: LightGBM pickles not found under {} — falling back to StubArtifact",
+            models_dir,
+        )
+        return StubArtifact()
+    return LightGBMArtifact(models_dir=models_dir)
+
+
 def create_app() -> Flask:
     app = Flask(
         __name__,
         template_folder="templates",
         static_folder="static",
     )
+
+    # Build the forecaster artifact once at app-init. The first /global
+    # request will lazily warm the LightGBM pickle cache.
+    app.config["GLOBAL_TAB_ARTIFACT"] = _build_default_artifact()
 
     # ── Pages ────────────────────────────────────────────────────────────
 
@@ -205,6 +233,7 @@ def create_app() -> Flask:
             gift_provider=_gift_provider,
             history_provider=_history_provider,
             chain_loader=_chain_loader,
+            model_artifact=app.config.get("GLOBAL_TAB_ARTIFACT"),
         )
 
         try:
@@ -225,6 +254,7 @@ def create_app() -> Flask:
             mode=view.mode,
             capital=view.capital,
             data_warnings=warnings,
+            artifact_name=view.artifact_paths.get("name", "stub"),
         )
 
     @app.route("/debates")

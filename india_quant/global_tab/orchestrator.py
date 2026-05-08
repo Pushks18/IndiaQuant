@@ -174,6 +174,6 @@ def build_global_view(
         briefing=briefing,
         heatmap=heatmap,
         cards=cards,
-        artifact_paths={},
+        artifact_paths={"name": getattr(artifact, "name", "stub")},
         staleness=staleness,
     )

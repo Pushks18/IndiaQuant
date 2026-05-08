@@ -10,9 +10,9 @@
 
 ## 0. Prerequisites
 
-- [ ] **brew install libomp** — required by lightgbm on macOS (verified missing in env on 2026-05-05). Without this, `import lightgbm` raises `Library not loaded: @rpath/libomp.dylib`. User runs this once.
-- [ ] **TimescaleDB up** with at least 250 trading days of `global_signals` + Nifty/BankNifty `price_data`. The current DB has ~8.9k `global_signals` rows through 2026-05-05 — sufficient.
-- [ ] **lightgbm pin** — confirm `lightgbm` is in `requirements.txt`; pin to a version compatible with installed numpy 2.2 / scikit-learn (currently `lightgbm==4.5.0` works with numpy 2.x).
+- [x] **brew install libomp** — required by lightgbm on macOS (verified missing in env on 2026-05-05). Without this, `import lightgbm` raises `Library not loaded: @rpath/libomp.dylib`. User runs this once.
+- [x] **TimescaleDB up** with at least 250 trading days of `global_signals` + Nifty/BankNifty `price_data`. The current DB has ~8.9k `global_signals` rows through 2026-05-05 — sufficient.
+- [x] **lightgbm pin** — confirm `lightgbm` is in `requirements.txt`; pin to a version compatible with installed numpy 2.2 / scikit-learn (currently `lightgbm==4.5.0` works with numpy 2.x).
 
 ---
 
@@ -87,14 +87,14 @@ Total: 11 numeric features (4 dow one-hot collapsed to dow integer to keep it ti
 
 **Files:** `india_quant/global_tab/training_features.py`, `tests/global_tab/test_training_features.py`
 
-- [ ] **Step 1:** Define `FEATURE_COLUMNS` list (the 11 names above) at module top so tests assert against it.
-- [ ] **Step 2:** `assemble_training_frame(index: str, start: date, end: date, *, session_factory) -> pd.DataFrame`. Returns a DataFrame indexed by session date with `FEATURE_COLUMNS + ['label_direction', 'label_return_bps']`.
+- [x] **Step 1:** Define `FEATURE_COLUMNS` list (the 11 names above) at module top so tests assert against it.
+- [x] **Step 2:** `assemble_training_frame(index: str, start: date, end: date, *, session_factory) -> pd.DataFrame`. Returns a DataFrame indexed by session date with `FEATURE_COLUMNS + ['label_direction', 'label_return_bps']`.
   - Pull `global_signals` for tickers `[^GSPC, ^IXIC, DX-Y.NYB, ^INDIAVIX, BZ=F]` between `start` and `end`.
   - Pull `price_data` for `^NSEI` / `^NSEBANK` over the window plus 30 days of lookback (for momentum + realized vol).
   - Build features per session date; drop rows where any feature is NaN (log count).
   - Compute labels by shifting close one session forward; drop the trailing row.
-- [ ] **Step 3:** Wrap feature assembly in a `to_feature_store(frame) -> PointInTimeFeatureStore` helper so live serving can reuse the same column logic via `register(name, frame[name])`.
-- [ ] **Step 4:** Tests:
+- [x] **Step 3:** Wrap feature assembly in a `to_feature_store(frame) -> PointInTimeFeatureStore` helper so live serving can reuse the same column logic via `register(name, frame[name])`.
+- [x] **Step 4:** Tests:
   - Synthetic DB fixture (extend `conftest.py`): 60 sessions of fake `global_signals` + Nifty prices.
   - Assert frame has `FEATURE_COLUMNS` columns and at least N-1 rows after label shift.
   - Assert no row has feature timestamp > its index date (no-future-peek).
@@ -104,43 +104,44 @@ Total: 11 numeric features (4 dow one-hot collapsed to dow integer to keep it ti
 
 **Files:** `india_quant/global_tab/lightgbm_artifact.py`, `tests/global_tab/test_lightgbm_artifact.py`
 
-- [ ] **Step 1:** `class LightGBMArtifact(ModelArtifact)` with `__init__(self, models_dir: Path = Path('models/global_tab'))`. Lazily loads `{INDEX}_direction.pkl` and `{INDEX}_magnitude_q{10,50,90}.pkl` on first predict for that index. Caches loaded boosters in a dict.
-- [ ] **Step 2:** `predict_direction(features, mode) -> (Direction, float)`:
+- [x] **Step 1:** `class LightGBMArtifact(ModelArtifact)` with `__init__(self, models_dir: Path = Path('models/global_tab'))`. Lazily loads `{INDEX}_direction.pkl` and `{INDEX}_magnitude_q{10,50,90}.pkl` on first predict for that index. Caches loaded boosters in a dict.
+- [x] **Step 2:** `predict_direction(features, mode) -> (Direction, float)`:
   - Build feature vector from `FeatureRow` in the order LightGBM was trained on.
   - `proba_up = booster.predict(vec)[0]` → in [0, 1].
   - `direction = LONG if proba_up > 0.5 + threshold else SHORT if proba_up < 0.5 - threshold else NO_TRADE`. Mode-specific threshold (e.g. balanced 0.05, conservative 0.10, aggressive 0.02).
   - `confidence = abs(proba_up - 0.5) * 2`, clipped to [0.5, 0.85].
-- [ ] **Step 3:** `predict_magnitude(features, mode) -> (median, p10, p90)` in bps. Returns 0,0,0 if direction model is missing.
-- [ ] **Step 4:** Protocol-conformance test using a tiny `lightgbm.LGBMClassifier()` fit on 50 random rows and pickled to a tmp dir. Assert `predict_direction` returns valid `(Direction, confidence)` and `predict_magnitude` returns 3 floats with `p10 ≤ p50 ≤ p90`.
-- [ ] **Step 5:** Test the missing-pickles fallback: instantiate with a path that doesn't exist, assert `predict_direction` raises a clear error (not a generic FileNotFoundError) — Flask route catches and falls back to StubArtifact.
+- [x] **Step 3:** `predict_magnitude(features, mode) -> (median, p10, p90)` in bps. Returns 0,0,0 if direction model is missing.
+- [x] **Step 4:** Protocol-conformance test using a tiny `lightgbm.LGBMClassifier()` fit on 50 random rows and pickled to a tmp dir. Assert `predict_direction` returns valid `(Direction, confidence)` and `predict_magnitude` returns 3 floats with `p10 ≤ p50 ≤ p90`.
+- [x] **Step 5:** Test the missing-pickles fallback: instantiate with a path that doesn't exist, assert `predict_direction` raises a clear error (not a generic FileNotFoundError) — Flask route catches and falls back to StubArtifact.
 
 ### Task 3: Training script
 
 **File:** `scripts/train_global_forecaster.py`
 
-- [ ] **Step 1:** argparse: `--index`, `--target {direction,magnitude,both}` (default both), `--start`, `--end`, `--seed`, `--out`, `--n-splits` (default 5 walk-forward folds).
-- [ ] **Step 2:** Pull frame via `assemble_training_frame`. Time-series split (sklearn `TimeSeriesSplit`); for each fold log out-of-sample logloss (direction) / pinball loss (magnitude).
-- [ ] **Step 3:** Refit on full train window with best hyperparams (start with sensible defaults: 200 trees, lr=0.05, num_leaves=31, min_data=20). No tuning sweep in 3b — log a TODO for Optuna in Phase 3c if the OOS metrics warrant it.
-- [ ] **Step 4:** Pickle each booster via `joblib.dump(booster, out / f'{index}_{target}.pkl', compress=3)`. Write a `training_summary.json` next to it with seed, fold metrics, sample counts, feature list, lightgbm version.
-- [ ] **Step 5:** Reproducibility gate: re-run training with the same seed + window, assert `joblib.dumps(booster)` byte-identical (or feature_importances arrays equal, since lightgbm pickle bytes can differ across runs for the same model in some versions).
+- [x] **Step 1:** argparse: `--index`, `--target {direction,magnitude,both}` (default both), `--start`, `--end`, `--seed`, `--out`, `--n-splits` (default 5 walk-forward folds).
+- [x] **Step 2:** Pull frame via `assemble_training_frame`. Time-series split (sklearn `TimeSeriesSplit`); for each fold log out-of-sample logloss (direction) / pinball loss (magnitude).
+- [x] **Step 3:** Refit on full train window with best hyperparams (start with sensible defaults: 200 trees, lr=0.05, num_leaves=31, min_data=20). No tuning sweep in 3b — log a TODO for Optuna in Phase 3c if the OOS metrics warrant it.
+- [x] **Step 4:** Pickle each booster via `joblib.dump(booster, out / f'{index}_{target}.pkl', compress=3)`. Write a `training_summary.json` next to it with seed, fold metrics, sample counts, feature list, lightgbm version.
+- [x] **Step 5:** Reproducibility gate: re-run training with the same seed + window, assert `joblib.dumps(booster)` byte-identical (or feature_importances arrays equal, since lightgbm pickle bytes can differ across runs for the same model in some versions).
 
 ### Task 4: Wire LightGBMArtifact into the Flask route
 
 **Files:** `india_quant/dashboard/app.py`
 
-- [ ] **Step 1:** At module scope (or inside `create_app` before route registration), construct `_DEFAULT_ARTIFACT = LightGBMArtifact()`. If the models dir doesn't exist or any pickle is unreadable, log a warning and set `_DEFAULT_ARTIFACT = StubArtifact()`.
-- [ ] **Step 2:** Pass `model_artifact=_DEFAULT_ARTIFACT` into `build_global_view` from the `/global` route handler.
-- [ ] **Step 3:** Add a small banner in `global_v2.html` when `view.staleness['artifact'] == 'stub'` so the user knows they're seeing stub output. Orchestrator populates `view.staleness['artifact'] = artifact.name` (add `name` property to both artifacts: `"stub"` / `"lightgbm@<git-sha>"`).
+- [x] **Step 1:** At module scope (or inside `create_app` before route registration), construct `_DEFAULT_ARTIFACT = LightGBMArtifact()`. If the models dir doesn't exist or any pickle is unreadable, log a warning and set `_DEFAULT_ARTIFACT = StubArtifact()`.
+- [x] **Step 2:** Pass `model_artifact=_DEFAULT_ARTIFACT` into `build_global_view` from the `/global` route handler.
+- [x] **Step 3:** Add a small banner in `global_v2.html` when `view.staleness['artifact'] == 'stub'` so the user knows they're seeing stub output. Orchestrator populates `view.staleness['artifact'] = artifact.name` (add `name` property to both artifacts: `"stub"` / `"lightgbm@<git-sha>"`).
 
 ### Task 5: End-to-end demo + test gate
 
-- [ ] **Step 1:** `venv/bin/python -m pytest tests/global_tab/ -v` — all green (Phase 1 + 2 + 3a + 3b ≥ 130 tests).
-- [ ] **Step 2:** `venv/bin/python scripts/train_global_forecaster.py --index NIFTY --start 2024-01-01 --end 2026-04-30 --seed 42 --out models/global_tab/`. Inspect `training_summary.json`: OOS log-loss should beat 0.69 (the always-up baseline = ~0.693). If not, log finding and document — Phase 3c tuning is a separate plan.
-- [ ] **Step 3:** Same for `--index BANKNIFTY`.
+- [x] **Step 1:** `venv/bin/python -m pytest tests/global_tab/ -v` — all green (Phase 1 + 2 + 3a + 3b ≥ 130 tests).
+- [ ] **Step 2:** `venv/bin/python scripts/train_global_forecaster.py --index NIFTY --start 2024-01-01 --end 2026-04-30 --seed 42 --out models/global_tab/`. Inspect `training_summary.json`: OOS log-loss should beat 0.69 (the always-up baseline = ~0.693). If not, log finding and document — Phase 3c tuning is a separate plan. **(awaiting live TimescaleDB run by user)**
+- [ ] **Step 3:** Same for `--index BANKNIFTY`. **(awaiting live TimescaleDB run by user)**
 - [ ] **Step 4:** Restart dashboard, hit `/global?capital=100000&mode=balanced`, confirm:
   - Cards no longer show `artifact=stub` banner.
   - Direction can be LONG, SHORT, or NO_TRADE depending on today's features (vs Phase 3a where direction was deterministic from GIFT premium).
   - Determinism property test from Phase 3a still passes (LightGBM is deterministic when seeded + no GPU).
+  **(awaiting trained pickles from steps 2-3)**
 
 ---
 

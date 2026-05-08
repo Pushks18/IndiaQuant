@@ -40,6 +40,18 @@
     {{ heatmap_html|safe }}
   </section>
 
+  {% if artifact_name == "stub" %}
+  <section class="artifact-banner">
+    &#9888; Forecast served by <strong>StubArtifact</strong> &mdash;
+    train LightGBM via <code>scripts/train_global_forecaster.py</code>
+    to upgrade.
+  </section>
+  {% elif artifact_name %}
+  <section class="artifact-banner artifact-banner-prod">
+    Forecast: <strong>{{ artifact_name }}</strong>
+  </section>
+  {% endif %}
+
   {% if cards %}
   <section class="tickets-grid">
     {% for card in cards %}
@@ -67,6 +79,8 @@
 .predicted-gap { padding: 8px; background: #263238; color: white; border-radius: 6px; margin-bottom: 16px; }
 .heatmap-section { margin-top: 24px; }
 .data-warnings p { color: #ff8a65; }
+.artifact-banner { margin: 8px 0 16px; padding: 8px 12px; background: #4e342e; color: #ffcc80; border-radius: 6px; font-size: 13px; }
+.artifact-banner-prod { background: #1b5e20; color: #c8e6c9; }
 .global-controls { display: flex; gap: 12px; align-items: end; margin-bottom: 12px; }
 .global-controls label { display: flex; flex-direction: column; font-size: 12px; color: #cfd8dc; }
 .global-controls input, .global-controls select { padding: 4px 6px; }
