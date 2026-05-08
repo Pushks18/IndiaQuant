@@ -291,6 +291,14 @@ def create_app() -> Flask:
                 logger.warning("chain load failed for {}: {}", index, exc)
                 return None
 
+        def _spot_provider(idx: str) -> float | None:
+            """Latest close from price_data for the index ticker. None on miss."""
+            try:
+                return ddata.latest_index_close(idx)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("spot lookup failed for {}: {}", idx, exc)
+                return None
+
         view = build_global_view(
             as_of=as_of,
             mode=mode,
@@ -301,6 +309,7 @@ def create_app() -> Flask:
             chain_loader=_chain_loader,
             model_artifact=app.config.get("GLOBAL_TAB_ARTIFACT"),
             analog_index=app.config.get("GLOBAL_TAB_ANALOG_INDEX"),
+            spot_provider=_spot_provider,
         )
 
         try:

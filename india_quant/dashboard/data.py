@@ -15,6 +15,23 @@ def latest_trading_date() -> date:
     return row[0] if row and row[0] else date.today()
 
 
+_INDEX_TICKER_FOR_SPOT = {"NIFTY": "^NSEI", "BANKNIFTY": "^NSEBANK"}
+
+
+def latest_index_close(index: str) -> float | None:
+    """Most recent end-of-day close for NIFTY / BANKNIFTY. None on miss."""
+    ticker = _INDEX_TICKER_FOR_SPOT.get(index.upper())
+    if ticker is None:
+        return None
+    with get_session() as s:
+        row = s.execute(text(
+            "SELECT close FROM price_data "
+            "WHERE ticker = :t AND interval = '1d' "
+            "ORDER BY datetime DESC LIMIT 1"
+        ), {"t": ticker}).fetchone()
+    return float(row[0]) if row and row[0] is not None else None
+
+
 def macro_snapshot() -> dict:
     """Quick macro card from yfinance — cached lightly inside the call."""
     try:

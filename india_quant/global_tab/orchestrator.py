@@ -143,6 +143,7 @@ def build_global_view(
     chain_loader: Callable[[str, datetime, date], Optional[OptionsChainSnapshot]],
     model_artifact: ModelArtifact | None = None,
     analog_index: AnalogIndex | None = None,
+    spot_provider: Callable[[str], Optional[float]] | None = None,
     llm: Any | None = None,
     indices: tuple[str, ...] = ("NIFTY", "BANKNIFTY"),
 ) -> GlobalTabView:
@@ -227,7 +228,8 @@ def build_global_view(
             live=LiveTicket(status=Status.WAITING, live_pnl=None, last_update=as_of),
             blurb=blurb_for_ticket(ctx, forecast.direction, index, llm=llm),
         )
-        live_status = compute_status(provisional, as_of)
+        spot = spot_provider(index) if spot_provider is not None else None
+        live_status = compute_status(provisional, as_of, current_spot=spot)
         ticket = dataclasses.replace(
             provisional,
             live=LiveTicket(status=live_status, live_pnl=None, last_update=as_of),

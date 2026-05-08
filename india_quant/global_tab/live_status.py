@@ -37,10 +37,18 @@ def _now_ist_time(now: datetime) -> time:
     return now.astimezone(_IST).time()
 
 
-def compute_status(ticket: TradeTicket, now: datetime) -> Status:
-    """Pure time-based status transition for a TradeTicket."""
+def compute_status(
+    ticket: TradeTicket,
+    now: datetime,
+    current_spot: float | None = None,
+) -> Status:
+    """Pure status transition for a TradeTicket.
+
+    Time-based transitions always fire. When `current_spot` is provided,
+    in-position state additionally checks the leg's underlying target /
+    stop triggers and may flip to TARGET_HIT or STOPPED_OUT.
+    """
     if ticket.direction == Direction.NO_TRADE:
-        # No trade was issued — status stays WAITING regardless of time.
         return Status.WAITING
 
     timing = ticket.timing
@@ -52,8 +60,24 @@ def compute_status(ticket: TradeTicket, now: datetime) -> Status:
         return Status.WAITING
     if t < timing.entry_window_end:
         return Status.ENTRY_ZONE_ACTIVE
-    if t < timing.exit_window_end and t < timing.invalidation_time:
-        # Past entry window but inside trade lifecycle — model as IN_POSITION.
-        # Phase 5b will refine with price triggers.
+
+    in_lifecycle = t < timing.exit_window_end and t < timing.invalidation_time
+
+    # Phase 5b: price-based flip if we know the live spot
+    leg = ticket.leg
+    if current_spot is not None and leg is not None:
+        # Direction-aware target/stop checks
+        if ticket.direction == Direction.LONG:
+            if current_spot >= leg.underlying_target_t1:
+                return Status.TARGET_HIT
+            if current_spot <= leg.underlying_stop_trigger:
+                return Status.STOPPED_OUT
+        elif ticket.direction == Direction.SHORT:
+            if current_spot <= leg.underlying_target_t1:
+                return Status.TARGET_HIT
+            if current_spot >= leg.underlying_stop_trigger:
+                return Status.STOPPED_OUT
+
+    if in_lifecycle:
         return Status.IN_POSITION
     return Status.EXPIRED_NO_ENTRY

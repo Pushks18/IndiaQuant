@@ -101,6 +101,63 @@ def test_utc_datetime_converted_correctly():
     assert compute_status(t, utc_at_930_ist) == Status.ENTRY_ZONE_ACTIVE
 
 
+def test_long_target_hit_when_spot_at_or_above_target():
+    t = _ticket(direction=Direction.LONG)
+    # leg.underlying_target_t1 = 24600.0 (from the fixture)
+    assert compute_status(t, _at(11, 0), current_spot=24650.0) == Status.TARGET_HIT
+    assert compute_status(t, _at(11, 0), current_spot=24600.0) == Status.TARGET_HIT
+
+
+def test_long_stopped_out_when_spot_at_or_below_stop():
+    t = _ticket(direction=Direction.LONG)
+    # leg.underlying_stop_trigger = 24400.0
+    assert compute_status(t, _at(11, 0), current_spot=24400.0) == Status.STOPPED_OUT
+    assert compute_status(t, _at(11, 0), current_spot=24350.0) == Status.STOPPED_OUT
+
+
+def test_long_in_position_between_target_and_stop():
+    t = _ticket(direction=Direction.LONG)
+    # spot mid-band → still in position
+    assert compute_status(t, _at(11, 0), current_spot=24500.0) == Status.IN_POSITION
+
+
+def _short_ticket():
+    """SHORT-flavored ticket: target_t1 below entry, stop_trigger above entry."""
+    leg = OptionsLeg(
+        underlying="NIFTY", strike=24500.0, option_type="PE",
+        expiry=date(2026, 5, 8), lot_size=50, lots=1, premium_estimate=120.0,
+        premium_zone=(115.0, 125.0),
+        target_t1=150.0, target_t2=180.0, stop_loss=100.0,
+        underlying_entry_trigger=24500.0, underlying_target_t1=24400.0,  # below
+        underlying_target_t2=24300.0, underlying_stop_trigger=24600.0,    # above
+    )
+    base = _ticket(direction=Direction.SHORT)
+    import dataclasses as _dc
+    return _dc.replace(base, leg=leg)
+
+
+def test_short_target_hit_inverts_direction():
+    """For SHORT, target is hit when spot moves DOWN past target_t1."""
+    t = _short_ticket()
+    # target_t1=24400; spot at or below → TARGET_HIT
+    assert compute_status(t, _at(11, 0), current_spot=24350.0) == Status.TARGET_HIT
+    assert compute_status(t, _at(11, 0), current_spot=24400.0) == Status.TARGET_HIT
+
+
+def test_short_stopped_out_when_spot_above_stop():
+    t = _short_ticket()
+    # stop_trigger=24600; spot at or above → STOPPED_OUT
+    assert compute_status(t, _at(11, 0), current_spot=24650.0) == Status.STOPPED_OUT
+    assert compute_status(t, _at(11, 0), current_spot=24600.0) == Status.STOPPED_OUT
+
+
+def test_price_flip_only_after_entry_window():
+    """Even with spot at target, status stays WAITING / ACTIVE during entry window."""
+    t = _ticket(direction=Direction.LONG)
+    assert compute_status(t, _at(9, 0), current_spot=24700.0) == Status.WAITING
+    assert compute_status(t, _at(9, 30), current_spot=24700.0) == Status.ENTRY_ZONE_ACTIVE
+
+
 def test_invalidation_time_caps_in_position():
     """If invalidation_time fires before exit_window_end, that's the cap."""
     early_invalid = TimingWindow(
