@@ -14,6 +14,8 @@ venv/
 
 # Models / data
 models/*.pkl
+models/global_tab/*.pkl
+models/global_tab/*_training_summary.json
 *.log
 
 # Editor / OS
