@@ -64,6 +64,26 @@ def _build_default_artifact():
     return artifact
 
 
+def _build_default_vol_artifact():
+    """Load the LightGBMVolArtifact for Phase 6b. Returns None when no
+    NIFTY_vol_q50.pkl is present — the orchestrator then falls back to the
+    HAR-RV analytical forecast."""
+    from pathlib import Path
+    from india_quant.global_tab.lightgbm_vol_artifact import LightGBMVolArtifact
+
+    cache = Path("models/global_tab/NIFTY_vol_q50.pkl")
+    if not cache.exists():
+        logger.info("VolArtifact: no NIFTY_vol_q50.pkl found — using analytical HAR-RV fallback")
+        return None
+    art = LightGBMVolArtifact()
+    # Eager-validate the NIFTY pickle so a stale n_features_in_ falls back at boot
+    if art._load_index("NIFTY") is None:
+        logger.warning("VolArtifact: NIFTY pickle invalid — using HAR-RV fallback")
+        return None
+    logger.info("VolArtifact: loaded {} (predict_vol path active)", cache)
+    return art
+
+
 def _build_default_analog_index():
     """Load AnalogIndex from a cached pickle, or build it lazily from the DB.
 
@@ -113,6 +133,7 @@ def create_app() -> Flask:
     # request will lazily warm the LightGBM pickle cache.
     app.config["GLOBAL_TAB_ARTIFACT"] = _build_default_artifact()
     app.config["GLOBAL_TAB_ANALOG_INDEX"] = _build_default_analog_index()
+    app.config["GLOBAL_TAB_VOL_ARTIFACT"] = _build_default_vol_artifact()
 
     # ── Pages ────────────────────────────────────────────────────────────
 
@@ -312,6 +333,7 @@ def create_app() -> Flask:
             spot_provider=_spot_provider,
             nifty_closes_provider=lambda: ddata.nifty_recent_closes(25),
             vol_implied_provider=None,   # falls through to context.signals India VIX read
+            vol_artifact=app.config.get("GLOBAL_TAB_VOL_ARTIFACT"),
         )
 
         from india_quant.global_tab.snapshot import write_view_snapshot
@@ -410,6 +432,7 @@ def create_app() -> Flask:
             spot_provider=_api_spot,
             nifty_closes_provider=lambda: ddata.nifty_recent_closes(25),
             vol_implied_provider=None,   # falls through to context.signals India VIX read
+            vol_artifact=app.config.get("GLOBAL_TAB_VOL_ARTIFACT"),
         )
         from india_quant.global_tab.snapshot import write_view_snapshot
         write_view_snapshot(view)

@@ -238,6 +238,7 @@ def build_global_view(
     spot_provider: Callable[[str], Optional[float]] | None = None,
     nifty_closes_provider: Callable[[], list[float]] | None = None,
     vol_implied_provider: Callable[[str], Optional[float]] | None = None,
+    vol_artifact: Any | None = None,
     llm: Any | None = None,
     indices: tuple[str, ...] = ("NIFTY", "BANKNIFTY"),
 ) -> GlobalTabView:
@@ -320,12 +321,19 @@ def build_global_view(
         if spot is None or spot <= 0:
             return _vol_no_trade(index, "data_gap", as_of)
 
-        # Vol forecast: HAR-RV blend on NIFTY closes (Phase 6a — same proxy used
-        # for both indices because the BANKNIFTY closes provider isn't wired yet).
-        vf = forecast_realized_vol(nifty_closes or [])
-        if vf is None:
-            return _vol_no_trade(index, "data_gap", as_of)
-        vol_forecast_pct = vf.annualized_pct
+        # Vol forecast: prefer the trained LightGBM artifact when available,
+        # else fall back to the HAR-RV analytical blend (Phase 6a).
+        vol_forecast_pct: float | None = None
+        if vol_artifact is not None:
+            try:
+                vol_forecast_pct = vol_artifact.predict_vol(features, index=index)
+            except Exception:  # noqa: BLE001
+                vol_forecast_pct = None
+        if vol_forecast_pct is None:
+            vf = forecast_realized_vol(nifty_closes or [])
+            if vf is None:
+                return _vol_no_trade(index, "data_gap", as_of)
+            vol_forecast_pct = vf.annualized_pct
 
         # Implied vol per index. NIFTY: India VIX. BANKNIFTY: India VIX × 1.20.
         if vol_implied_provider is not None:
