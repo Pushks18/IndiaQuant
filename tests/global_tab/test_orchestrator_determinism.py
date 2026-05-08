@@ -178,6 +178,57 @@ def test_determinism_property(capital, mode):
     assert dataclasses.asdict(v1) == dataclasses.asdict(v2)
 
 
+def test_conservative_mode_blocks_when_no_top_decile_analog():
+    """In Conservative mode, a forecast that would otherwise produce a card
+    must instead emit a no_trade_ticket with reason 'no_top_decile_analog'
+    when the AnalogIndex says the closest analog isn't in the top decile."""
+    from india_quant.global_tab.analog_index import AnalogIndex, AnalogStats
+
+    # Stub index that always reports top_decile_match=False
+    class _StubAnalog:
+        def lookup(self, features, predicted_direction, k: int = 20):
+            return AnalogStats(count=20, winrate=0.5, avg_return_bps=0.0,
+                               top_decile_match=False)
+
+    view = build_global_view(
+        as_of=datetime(2026, 5, 5, 9, 30, tzinfo=timezone.utc),
+        mode=Mode.CONSERVATIVE, capital=1_000_000,
+        context_provider=_ctx_provider(),
+        gift_provider=_gift_provider(0.45),  # premium >> 20bps → would-be LONG
+        history_provider=_history_provider(),
+        chain_loader=_chain_loader_factory(),
+        analog_index=_StubAnalog(),
+    )
+    # Conservative gates on top-decile analog → all NO_TRADE
+    assert all(c.direction == Direction.NO_TRADE for c in view.cards)
+    assert all(
+        c.reasoning.no_trade_reason_code == "no_top_decile_analog"
+        for c in view.cards
+    )
+
+
+def test_balanced_mode_does_not_gate_on_top_decile_analog():
+    """Balanced mode must still produce trades even when no top-decile match
+    exists — the gate is Conservative-only."""
+    from india_quant.global_tab.analog_index import AnalogStats
+
+    class _StubAnalog:
+        def lookup(self, features, predicted_direction, k: int = 20):
+            return AnalogStats(20, 0.5, 0.0, top_decile_match=False)
+
+    view = build_global_view(
+        as_of=datetime(2026, 5, 5, 9, 30, tzinfo=timezone.utc),
+        mode=Mode.BALANCED, capital=1_000_000,
+        context_provider=_ctx_provider(),
+        gift_provider=_gift_provider(0.45),
+        history_provider=_history_provider(),
+        chain_loader=_chain_loader_factory(),
+        analog_index=_StubAnalog(),
+    )
+    # Balanced does not require top-decile → at least one LONG card
+    assert any(c.direction == Direction.LONG for c in view.cards)
+
+
 def test_view_contains_briefing_and_heatmap():
     view = build_global_view(
         as_of=datetime(2026, 5, 5, 9, 30, tzinfo=timezone.utc),

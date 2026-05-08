@@ -175,6 +175,20 @@ def build_global_view(
             ))
             continue
 
+        # Conservative mode: require a top-decile analog match. The spec gates
+        # the most expensive setup on "this looks like a known winning regime"
+        # — if the closest historical session isn't in the top 10% of the
+        # similarity distribution, refuse the trade.
+        from india_quant.global_tab.modes import MODE_CONFIGS
+        mcfg = MODE_CONFIGS.get(mode)
+        if mcfg is not None and getattr(mcfg, "require_top_decile_analog", False):
+            if not stats.top_decile_match:
+                cards.append(_no_trade_ticket(
+                    index, "no_top_decile_analog", features, as_of,
+                    confidence=forecast.confidence, analog_stats=stats,
+                ))
+                continue
+
         if chain is None:
             cards.append(_no_trade_ticket(
                 index, "data_gap", features, as_of,

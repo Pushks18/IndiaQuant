@@ -18,6 +18,7 @@ _REASON_PRETTY = {
     "data_gap": "options chain unavailable",
     "stale_data": "stale data",
     "outside_window": "outside entry window",
+    "no_top_decile_analog": "no top-decile historical analog (conservative mode gate)",
 }
 
 _DIR_WORD = {
