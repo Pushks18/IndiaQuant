@@ -34,7 +34,18 @@ def _build_default_artifact():
             models_dir,
         )
         return StubArtifact()
-    return LightGBMArtifact(models_dir=models_dir)
+    artifact = LightGBMArtifact(models_dir=models_dir)
+    # Eager-validate (n_features_in_ guard) so a stale pickle from before a
+    # FEATURE_COLUMNS bump falls back to Stub at boot rather than at first request.
+    try:
+        artifact._load_index("NIFTY")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "global_tab: LightGBM pickle validation failed ({}) — falling back to StubArtifact",
+            exc,
+        )
+        return StubArtifact()
+    return artifact
 
 
 def create_app() -> Flask:
