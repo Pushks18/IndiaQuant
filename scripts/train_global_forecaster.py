@@ -69,6 +69,7 @@ class TrainingSummary:
     lightgbm_version: str
     fold_metrics: list[FoldMetric] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    tuning: dict[str, Any] = field(default_factory=dict)
 
     def to_json(self) -> dict[str, Any]:
         d = asdict(self)
@@ -97,16 +98,18 @@ def _pinball_loss(y_true: np.ndarray, y_pred: np.ndarray, alpha: float) -> float
 
 
 def _train_direction(
-    df: pd.DataFrame, seed: int, n_splits: int, summary: TrainingSummary
+    df: pd.DataFrame, seed: int, n_splits: int, summary: TrainingSummary,
+    *, override_params: dict[str, Any] | None = None,
 ) -> lgb.LGBMClassifier:
     X = df[FEATURE_COLUMNS].to_numpy()
     y = df["label_direction"].to_numpy().astype(int)
 
+    base_params = {**_DIRECTION_PARAMS, **(override_params or {}), "random_state": seed}
+
     if n_splits >= 2 and len(df) >= n_splits + 5:
         tscv = TimeSeriesSplit(n_splits=n_splits)
         for i, (tr, va) in enumerate(tscv.split(X)):
-            params = {**_DIRECTION_PARAMS, "random_state": seed}
-            clf = lgb.LGBMClassifier(**params)
+            clf = lgb.LGBMClassifier(**base_params)
             clf.fit(X[tr], y[tr])
             proba = clf.predict_proba(X[va])[:, 1]
             ll = log_loss(y[va], proba, labels=[0, 1]) if len(set(y[va])) > 1 else float("nan")
@@ -120,7 +123,7 @@ def _train_direction(
             f"Skipped walk-forward (n_splits={n_splits}, n_rows={len(df)})"
         )
 
-    final = lgb.LGBMClassifier(**{**_DIRECTION_PARAMS, "random_state": seed})
+    final = lgb.LGBMClassifier(**base_params)
     final.fit(X, y)
     return final
 
@@ -128,15 +131,20 @@ def _train_direction(
 def _train_magnitude_quantile(
     df: pd.DataFrame, alpha: float, seed: int, n_splits: int,
     summary: TrainingSummary, label_key: str,
+    *, override_params: dict[str, Any] | None = None,
 ) -> lgb.LGBMRegressor:
     X = df[FEATURE_COLUMNS].to_numpy()
     y = df["label_return_bps"].to_numpy().astype(float)
 
+    base_params = {
+        **_MAGNITUDE_PARAMS, **(override_params or {}),
+        "alpha": alpha, "random_state": seed,
+    }
+
     if n_splits >= 2 and len(df) >= n_splits + 5:
         tscv = TimeSeriesSplit(n_splits=n_splits)
         for i, (tr, va) in enumerate(tscv.split(X)):
-            params = {**_MAGNITUDE_PARAMS, "alpha": alpha, "random_state": seed}
-            m = lgb.LGBMRegressor(**params)
+            m = lgb.LGBMRegressor(**base_params)
             m.fit(X[tr], y[tr])
             pinball = _pinball_loss(y[va], m.predict(X[va]), alpha)
             summary.fold_metrics.append(FoldMetric(
@@ -149,9 +157,44 @@ def _train_magnitude_quantile(
                 label_key, i, pinball, len(tr), len(va),
             )
 
-    final = lgb.LGBMRegressor(**{**_MAGNITUDE_PARAMS, "alpha": alpha, "random_state": seed})
+    final = lgb.LGBMRegressor(**base_params)
     final.fit(X, y)
     return final
+
+
+def _run_tuning(
+    df: pd.DataFrame, *, target_kind: str, n_splits: int, n_trials: int,
+    storage: str | None, seed: int, index: str,
+) -> dict[str, Any]:
+    """Run Optuna for a given target_kind and return best params."""
+    from india_quant.global_tab.tuning import OptunaSweep
+
+    features = df[FEATURE_COLUMNS]
+    if target_kind == "direction":
+        labels = df["label_direction"].astype(int)
+        sweep = OptunaSweep(features, labels, target="direction",
+                            n_splits=n_splits, seed=seed)
+        result = sweep.run(n_trials=n_trials, storage=storage,
+                           study_name=f"global_tab_{index}_direction_{seed}")
+        logger.info("tune direction: best logloss={:.4f}, params={}",
+                    result.best_value, result.best_params)
+        return {"direction": {"best_value": result.best_value,
+                              "best_params": result.best_params,
+                              "n_trials": result.n_trials}}
+    else:
+        out: dict[str, Any] = {}
+        for alpha, key in [(0.10, "q10"), (0.50, "q50"), (0.90, "q90")]:
+            labels = df["label_return_bps"].astype(float)
+            sweep = OptunaSweep(features, labels, target="magnitude",
+                                quantile=alpha, n_splits=n_splits, seed=seed)
+            result = sweep.run(n_trials=n_trials, storage=storage,
+                               study_name=f"global_tab_{index}_magnitude_{key}_{seed}")
+            logger.info("tune magnitude {}: best pinball={:.2f}, params={}",
+                        key, result.best_value, result.best_params)
+            out[key] = {"best_value": result.best_value,
+                        "best_params": result.best_params,
+                        "n_trials": result.n_trials}
+        return out
 
 
 def train(
@@ -164,6 +207,9 @@ def train(
     out: Path,
     n_splits: int,
     session_factory: Callable,
+    tune: bool = False,
+    n_trials: int = 30,
+    tune_storage: str | None = None,
 ) -> TrainingSummary:
     df = assemble_training_frame(
         index=index, start=start, end=end, session_factory=session_factory,
@@ -179,14 +225,37 @@ def train(
         lightgbm_version=lgb.__version__,
     )
 
+    direction_override: dict[str, Any] | None = None
+    magnitude_overrides: dict[str, dict[str, Any]] = {}
+    if tune:
+        if target in {"direction", "both"}:
+            tune_result = _run_tuning(
+                df, target_kind="direction", n_splits=n_splits,
+                n_trials=n_trials, storage=tune_storage, seed=seed, index=index,
+            )
+            summary.tuning.update(tune_result)
+            direction_override = tune_result["direction"]["best_params"]
+        if target in {"magnitude", "both"}:
+            tune_result = _run_tuning(
+                df, target_kind="magnitude", n_splits=n_splits,
+                n_trials=n_trials, storage=tune_storage, seed=seed, index=index,
+            )
+            summary.tuning.update(tune_result)
+            for key, payload in tune_result.items():
+                magnitude_overrides[key] = payload["best_params"]
+
     if target in {"direction", "both"}:
-        clf = _train_direction(df, seed, n_splits, summary)
+        clf = _train_direction(df, seed, n_splits, summary,
+                               override_params=direction_override)
         joblib.dump(clf, out / f"{index}_direction.pkl", compress=3)
         logger.info("wrote {}", out / f"{index}_direction.pkl")
 
     if target in {"magnitude", "both"}:
         for alpha, key in [(0.10, "q10"), (0.50, "q50"), (0.90, "q90")]:
-            m = _train_magnitude_quantile(df, alpha, seed, n_splits, summary, key)
+            m = _train_magnitude_quantile(
+                df, alpha, seed, n_splits, summary, key,
+                override_params=magnitude_overrides.get(key),
+            )
             joblib.dump(m, out / f"{index}_magnitude_{key}.pkl", compress=3)
             logger.info("wrote {}", out / f"{index}_magnitude_{key}.pkl")
 
@@ -214,6 +283,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--seed",  type=int, default=42)
     p.add_argument("--out",   default="models/global_tab/")
     p.add_argument("--n-splits", type=int, default=5)
+    p.add_argument("--tune", action="store_true",
+                   help="Run Optuna sweep before final fit")
+    p.add_argument("--n-trials", type=int, default=30,
+                   help="Optuna trials per target (only with --tune)")
+    p.add_argument("--tune-storage", default=None,
+                   help="Optuna storage URI, e.g. sqlite:///optuna_global_tab.db")
     args = p.parse_args(argv)
 
     train(
@@ -225,6 +300,9 @@ def main(argv: list[str] | None = None) -> int:
         out=Path(args.out),
         n_splits=args.n_splits,
         session_factory=_build_real_session_factory(),
+        tune=args.tune,
+        n_trials=args.n_trials,
+        tune_storage=args.tune_storage,
     )
     return 0
 
