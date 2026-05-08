@@ -15,12 +15,24 @@ from india_quant.global_tab.types import Direction, Mode
 
 @dataclass(frozen=True)
 class FeatureRow:
-    """Phase 3a feature set. Phase 3b extends; the dataclass is additive."""
+    """Phase 3a feature set, extended in Phase 3b for the LightGBM artifact.
+
+    The Phase 3b additions all default to None so existing call sites
+    (StubArtifact + Phase 3a tests) keep working unchanged. LightGBMArtifact
+    treats None as 0.0 (median imputation) at predict-time.
+    """
     gift_nifty_premium_bps: float | None
     spx_overnight_pct: float | None
     dxy_delta_pct: float | None
     india_vix_delta_pct: float | None
     brent_overnight_pct: float | None
+    # Phase 3b additions
+    nasdaq_overnight_pct: float | None = None
+    nifty_5d_momentum: float | None = None
+    nifty_realized_vol_20d: float | None = None
+    dow_int: int | None = None
+    is_expiry_week: int | None = None
+    days_to_rbi_policy: int | None = None
 
     def as_dict(self) -> dict[str, float | None]:
         return {
@@ -29,6 +41,12 @@ class FeatureRow:
             "dxy_delta_pct": self.dxy_delta_pct,
             "india_vix_delta_pct": self.india_vix_delta_pct,
             "brent_overnight_pct": self.brent_overnight_pct,
+            "nasdaq_overnight_pct": self.nasdaq_overnight_pct,
+            "nifty_5d_momentum": self.nifty_5d_momentum,
+            "nifty_realized_vol_20d": self.nifty_realized_vol_20d,
+            "dow_int": self.dow_int,
+            "is_expiry_week": self.is_expiry_week,
+            "days_to_rbi_policy": self.days_to_rbi_policy,
         }
 
 
@@ -45,13 +63,15 @@ class IndexForecast:
 
 
 class ModelArtifact(Protocol):
+    name: str
+
     def predict_direction(
-        self, features: FeatureRow, mode: Mode
+        self, features: FeatureRow, mode: Mode, *, index: str = "NIFTY"
     ) -> tuple[Direction, float]:
         ...
 
     def predict_magnitude(
-        self, features: FeatureRow, mode: Mode
+        self, features: FeatureRow, mode: Mode, *, index: str = "NIFTY"
     ) -> tuple[float, float, float]:
         """Return (median, p10, p90) in bps."""
         ...
@@ -77,9 +97,12 @@ class StubArtifact:
       otherwise         → NO_TRADE, confidence = 0.0
     """
 
+    name = "stub"
+
     def predict_direction(
-        self, features: FeatureRow, mode: Mode
+        self, features: FeatureRow, mode: Mode, *, index: str = "NIFTY"
     ) -> tuple[Direction, float]:
+        del index  # stub is index-agnostic
         p = features.gift_nifty_premium_bps
         if p is None or abs(p) <= _PREMIUM_THRESHOLD_BPS:
             return Direction.NO_TRADE, 0.0
@@ -87,8 +110,9 @@ class StubArtifact:
         return (Direction.LONG if p > 0 else Direction.SHORT, confidence)
 
     def predict_magnitude(
-        self, features: FeatureRow, mode: Mode
+        self, features: FeatureRow, mode: Mode, *, index: str = "NIFTY"
     ) -> tuple[float, float, float]:
+        del index
         return _STUB_MAGNITUDE[mode]
 
 
@@ -105,7 +129,7 @@ def forecast_index(
     features: FeatureRow,
     model_artifact: ModelArtifact,
 ) -> IndexForecast:
-    direction, confidence = model_artifact.predict_direction(features, mode)
+    direction, confidence = model_artifact.predict_direction(features, mode, index=index)
     if direction == Direction.NO_TRADE:
         return IndexForecast(
             index=index,
@@ -118,7 +142,7 @@ def forecast_index(
             no_trade_reason_code="no_overnight_catalyst",
         )
 
-    median, p10, p90 = model_artifact.predict_magnitude(features, mode)
+    median, p10, p90 = model_artifact.predict_magnitude(features, mode, index=index)
     # Sign the magnitude by direction so the sizer can simply use spot ± expected_move.
     sign = 1.0 if direction == Direction.LONG else -1.0
     return IndexForecast(
