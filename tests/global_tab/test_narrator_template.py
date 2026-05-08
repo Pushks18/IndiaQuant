@@ -20,13 +20,14 @@ def _ctx(reason: str | None = None, drivers=None, analogs=(0, 0.0, 0.0)):
 
 
 def test_trade_template_interpolation():
-    ctx = _ctx(drivers=[("gift_nifty_premium_bps", 45.0)], analogs=(20, 0.65, 12500.0))
+    ctx = _ctx(drivers=[("gift_nifty_premium_bps", 45.0)], analogs=(20, 0.65, 35.0))
     blurb = blurb_for_ticket(ctx, Direction.LONG, "NIFTY")
     assert "NIFTY long" in blurb
     assert "gift_nifty_premium_bps (+45bps)" in blurb
     assert "20 analog sessions" in blurb
     assert "65%" in blurb
-    assert "₹12,500" in blurb
+    # Phase 4a: analog avg is bps (mean signed return across K analogs), not rupees
+    assert "+35 bps" in blurb
 
 
 def test_short_uses_short_word():
