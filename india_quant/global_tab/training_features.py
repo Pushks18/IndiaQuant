@@ -162,7 +162,7 @@ def assemble_training_frame(
 
     # Index closes
     px_df = pd.DataFrame(px_rows, columns=["datetime", "close"])
-    px_df["date"] = pd.to_datetime(px_df["datetime"]).dt.date
+    px_df["date"] = pd.to_datetime(px_df["datetime"], utc=True).dt.tz_convert("Asia/Kolkata").dt.date
     px_df = px_df.drop_duplicates("date").sort_values("date").set_index("date")
     px_df["log_close"] = np.log(px_df["close"].astype(float))
     px_df["log_ret"] = px_df["log_close"].diff()
