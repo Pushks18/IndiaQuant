@@ -94,7 +94,7 @@ def test_train_writes_pickles_and_summary(tmp_path):
     js = json.loads((tmp_path / "NIFTY_training_summary.json").read_text())
     assert js["index"] == "NIFTY"
     assert js["seed"] == 42
-    assert js["n_features"] == 11
+    assert js["n_features"] >= 11  # Phase 3d adds more; never shrinks
     assert len(js["fold_metrics"]) >= 3  # at least direction folds
 
 
