@@ -116,6 +116,28 @@ class LiveTicket:
 
 
 @dataclass(frozen=True)
+class StraddleLeg:
+    """Phase 6a: ATM long straddle (call + put) for the volatility strategy.
+
+    Both legs are bought at the same strike (ATM). Max loss is the total
+    premium paid. Profit when |spot_at_expiry - strike| > total_premium.
+    """
+    underlying: str
+    strike: float
+    expiry: date
+    lot_size: int
+    lots: int
+    call_premium: float
+    put_premium: float
+    total_premium: float       # call_premium + put_premium per lot
+    breakeven_high: float
+    breakeven_low: float
+    max_loss: float            # total_premium × lot_size × lots (rupees)
+    vol_forecast_pct: float    # annualized %
+    vol_implied_pct: float     # annualized %
+
+
+@dataclass(frozen=True)
 class TradeTicket:
     index: str
     direction: Direction
@@ -126,6 +148,11 @@ class TradeTicket:
     reasoning: ReasoningContext
     live: LiveTicket
     blurb: str
+    # Phase 6a: variant marker so the renderer can branch. "directional" is
+    # the legacy ticket type produced by forecast_index + size_trade.
+    # "straddle" is the volatility variant — populated via build_straddle_ticket.
+    kind: str = "directional"
+    straddle: StraddleLeg | None = None
 
 
 @dataclass(frozen=True)

@@ -19,6 +19,8 @@ _REASON_PRETTY = {
     "stale_data": "stale data",
     "outside_window": "outside entry window",
     "no_top_decile_analog": "no top-decile historical analog (conservative mode gate)",
+    "vol_below_threshold": "forecast vol does not beat implied by the mode buffer",
+    "vol_analog_low_hitrate": "fewer than 60% of analog sessions cleared the breakeven",
 }
 
 _DIR_WORD = {
@@ -65,6 +67,36 @@ def _render_template(
     return (
         f"{index} {_DIR_WORD[direction]}: top driver {drv0_name} "
         f"({drv0_val:+.0f}bps); {analog_clause}"
+    )
+
+
+def blurb_for_straddle(ticket) -> str:
+    """Render the deterministic straddle blurb. Reads ticket.straddle and
+    ticket.reasoning to produce a one-liner like:
+
+      'NIFTY straddle: 24500 strike, breakeven 24380/24620, max loss ₹6,250.
+      Forecast σ 14.2% > implied 12.0% (×1.18). 12 of 20 analog sessions
+      cleared breakeven.'
+    """
+    s = ticket.straddle
+    ctx = ticket.reasoning
+    if s is None:
+        # No-trade variant: use the reason code
+        base = f"{ticket.index} straddle: no trade. {_reason_pretty(ctx.no_trade_reason_code)}."
+        if ctx.analog_count > 0:
+            return f"{base} {ctx.analog_count} analog sessions cleared breakeven {ctx.analog_winrate:.0%} of the time."
+        return base
+
+    ratio = s.vol_forecast_pct / s.vol_implied_pct if s.vol_implied_pct > 0 else 0.0
+    analog = ""
+    if ctx.analog_count > 0:
+        analog = f" {ctx.analog_count} analog sessions cleared breakeven {ctx.analog_winrate:.0%} of the time."
+    return (
+        f"{ticket.index} straddle: {s.strike:.0f} strike, "
+        f"breakeven {s.breakeven_low:,.0f}/{s.breakeven_high:,.0f}, "
+        f"max loss ₹{s.max_loss:,.0f}. "
+        f"Forecast σ {s.vol_forecast_pct:.1f}% > implied {s.vol_implied_pct:.1f}% (×{ratio:.2f})."
+        f"{analog}"
     )
 
 

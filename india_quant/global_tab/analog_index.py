@@ -157,6 +157,26 @@ class AnalogIndex:
             top_decile_match=top_decile,
         )
 
+    def lookup_breakeven(
+        self,
+        features: FeatureRow,
+        breakeven_bps: float,
+        k: int = 20,
+    ) -> float:
+        """Fraction of the K nearest analogs whose absolute realised return
+        exceeded `breakeven_bps`. Used by the straddle strategy to estimate
+        historical hit-rate at the given breakeven distance.
+        """
+        if self.n_samples == 0:
+            return 0.0
+        q = self._vectorize_query(features)
+        with np.errstate(over="ignore", divide="ignore", invalid="ignore"):
+            sims = self._X @ q
+            sims = np.nan_to_num(sims, nan=-np.inf, posinf=-np.inf, neginf=-np.inf)
+        top_k = min(k, self.n_samples)
+        top_idx = np.argsort(-sims)[:top_k]
+        return float(np.mean(np.abs(self._yr[top_idx]) >= float(breakeven_bps)))
+
     def _winrate(self, idx: np.ndarray, predicted: Direction) -> float:
         if predicted == Direction.NO_TRADE:
             # Neutral baseline: report fraction of UP days for context only.
