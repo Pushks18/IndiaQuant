@@ -311,6 +311,7 @@ def create_app() -> Flask:
             analog_index=app.config.get("GLOBAL_TAB_ANALOG_INDEX"),
             spot_provider=_spot_provider,
             nifty_closes_provider=lambda: ddata.nifty_recent_closes(25),
+            vol_implied_provider=None,   # falls through to context.signals India VIX read
         )
 
         from india_quant.global_tab.snapshot import write_view_snapshot
@@ -394,13 +395,21 @@ def create_app() -> Flask:
             except Exception:  # noqa: BLE001
                 return None
 
+        def _api_spot(idx: str) -> float | None:
+            try:
+                return ddata.latest_index_close(idx)
+            except Exception:  # noqa: BLE001
+                return None
+
         view = build_global_view(
             as_of=_dt.now(), mode=mode, capital=capital,
             context_provider=_ctx, gift_provider=_gift,
             history_provider=_hist, chain_loader=_chain,
             model_artifact=app.config.get("GLOBAL_TAB_ARTIFACT"),
             analog_index=app.config.get("GLOBAL_TAB_ANALOG_INDEX"),
+            spot_provider=_api_spot,
             nifty_closes_provider=lambda: ddata.nifty_recent_closes(25),
+            vol_implied_provider=None,   # falls through to context.signals India VIX read
         )
         from india_quant.global_tab.snapshot import write_view_snapshot
         write_view_snapshot(view)

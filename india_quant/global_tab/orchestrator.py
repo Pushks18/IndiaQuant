@@ -14,6 +14,8 @@ import pandas as pd
 from india_quant.data.fetchers.gift_nifty_fetcher import GiftNiftyQuote
 from india_quant.global_tab.analog_index import AnalogIndex, AnalogStats
 from india_quant.global_tab.live_status import compute_status
+from india_quant.global_tab.vol_forecaster import forecast_realized_vol
+from india_quant.global_tab.vol_strategy import build_straddle_ticket
 from india_quant.global_tab.briefing import build_briefing
 from india_quant.global_tab.correlation import build_heatmap
 from india_quant.global_tab.forecaster import (
@@ -23,7 +25,7 @@ from india_quant.global_tab.forecaster import (
     forecast_index,
 )
 from india_quant.global_tab.instruments import next_weekly_expiry
-from india_quant.global_tab.narrator import blurb_for_ticket
+from india_quant.global_tab.narrator import blurb_for_straddle, blurb_for_ticket
 from india_quant.global_tab.options_chain import OptionsChainSnapshot
 from india_quant.global_tab.options_sizer import size_trade
 from india_quant.global_tab.types import (
@@ -157,6 +159,36 @@ def _build_features(
     )
 
 
+def _vol_no_trade(index: str, reason: str, as_of: datetime) -> TradeTicket:
+    """A no-trade variant for the straddle path — flagged kind=straddle so
+    the renderer routes it to the vol card layout rather than the directional
+    layout."""
+    ctx = ReasoningContext(
+        top_drivers=[], analog_count=0, analog_winrate=0.0,
+        analog_avg_pnl=0.0, no_trade_reason_code=reason,
+    )
+    return TradeTicket(
+        index=index, direction=Direction.NO_TRADE, confidence=0.0,
+        leg=None, timing=None, risk_reward=None, reasoning=ctx,
+        live=LiveTicket(status=Status.WAITING, live_pnl=None, last_update=as_of),
+        blurb="", kind="straddle", straddle=None,
+    )
+
+
+def _default_vol_implied(context, index: str) -> float | None:
+    """Read India VIX from context.signals (publishes annualized %).
+    BANKNIFTY proxy = India VIX × 1.20 (rough historical multiplier).
+    """
+    rows = list(getattr(context, "signals", []) or [])
+    vix_row = _row_by_ticker(rows, "^INDIAVIX")
+    if vix_row is None:
+        return None
+    vix = getattr(vix_row, "price", None)
+    if vix is None or vix <= 0:
+        return None
+    return float(vix) * (1.20 if index == "BANKNIFTY" else 1.0)
+
+
 def _no_trade_ticket(
     index: str,
     reason_code: str,
@@ -205,6 +237,7 @@ def build_global_view(
     analog_index: AnalogIndex | None = None,
     spot_provider: Callable[[str], Optional[float]] | None = None,
     nifty_closes_provider: Callable[[], list[float]] | None = None,
+    vol_implied_provider: Callable[[str], Optional[float]] | None = None,
     llm: Any | None = None,
     indices: tuple[str, ...] = ("NIFTY", "BANKNIFTY"),
 ) -> GlobalTabView:
@@ -221,53 +254,43 @@ def build_global_view(
     features = _build_features(context, gift, as_of=as_of, nifty_closes=nifty_closes)
     expiry = next_weekly_expiry(as_of.date())
 
-    cards: list[TradeTicket] = []
-    for index in indices:
+    def _build_directional_ticket(index: str) -> TradeTicket:
+        """Returns exactly one TradeTicket for the directional path."""
         chain = chain_loader(index, as_of, expiry)
         forecast = forecast_index(index, as_of, mode, features, artifact)
 
-        # Phase 4a: real analog stats. None index → zero-stat fallback (preserves
-        # the Phase 3a behaviour for callers that haven't wired the index yet).
         if analog_index is not None:
             stats = analog_index.lookup(features, forecast.direction)
         else:
             stats = AnalogStats(0, 0.0, 0.0, False)
 
         if forecast.direction == Direction.NO_TRADE:
-            cards.append(_no_trade_ticket(
+            return _no_trade_ticket(
                 index, forecast.no_trade_reason_code or "no_overnight_catalyst",
                 features, as_of, analog_stats=stats,
-            ))
-            continue
+            )
 
-        # Conservative mode: require a top-decile analog match. The spec gates
-        # the most expensive setup on "this looks like a known winning regime"
-        # — if the closest historical session isn't in the top 10% of the
-        # similarity distribution, refuse the trade.
-        from india_quant.global_tab.modes import MODE_CONFIGS
-        mcfg = MODE_CONFIGS.get(mode)
+        from india_quant.global_tab.modes import MODE_CONFIGS as _MC
+        mcfg = _MC.get(mode)
         if mcfg is not None and getattr(mcfg, "require_top_decile_analog", False):
             if not stats.top_decile_match:
-                cards.append(_no_trade_ticket(
+                return _no_trade_ticket(
                     index, "no_top_decile_analog", features, as_of,
                     confidence=forecast.confidence, analog_stats=stats,
-                ))
-                continue
+                )
 
         if chain is None:
-            cards.append(_no_trade_ticket(
+            return _no_trade_ticket(
                 index, "data_gap", features, as_of,
                 confidence=forecast.confidence, analog_stats=stats,
-            ))
-            continue
+            )
 
         sized = size_trade(forecast, capital, mode, chain)
         if sized is None:
-            cards.append(_no_trade_ticket(
+            return _no_trade_ticket(
                 index, "below_mode_threshold", features, as_of,
                 confidence=forecast.confidence, analog_stats=stats,
-            ))
-            continue
+            )
 
         leg, rr, timing = sized
         ctx = ReasoningContext(
@@ -277,26 +300,55 @@ def build_global_view(
             analog_avg_pnl=stats.avg_return_bps,
             no_trade_reason_code=None,
         )
-        # Build the ticket first with WAITING so compute_status can read its
-        # timing window; then re-stamp with the time-derived status.
         provisional = TradeTicket(
-            index=index,
-            direction=forecast.direction,
-            confidence=forecast.confidence,
-            leg=leg,
-            timing=timing,
-            risk_reward=rr,
-            reasoning=ctx,
+            index=index, direction=forecast.direction, confidence=forecast.confidence,
+            leg=leg, timing=timing, risk_reward=rr, reasoning=ctx,
             live=LiveTicket(status=Status.WAITING, live_pnl=None, last_update=as_of),
             blurb=blurb_for_ticket(ctx, forecast.direction, index, llm=llm),
         )
         spot = spot_provider(index) if spot_provider is not None else None
         live_status = compute_status(provisional, as_of, current_spot=spot)
-        ticket = dataclasses.replace(
+        return dataclasses.replace(
             provisional,
             live=LiveTicket(status=live_status, live_pnl=None, last_update=as_of),
         )
-        cards.append(ticket)
+
+    def _build_straddle_card(index: str) -> TradeTicket:
+        """Phase 6a: long-vol straddle card per index. Always emits one ticket
+        (either the straddle or a vol-no-trade variant)."""
+        spot = spot_provider(index) if spot_provider is not None else None
+        if spot is None or spot <= 0:
+            return _vol_no_trade(index, "data_gap", as_of)
+
+        # Vol forecast: HAR-RV blend on NIFTY closes (Phase 6a — same proxy used
+        # for both indices because the BANKNIFTY closes provider isn't wired yet).
+        vf = forecast_realized_vol(nifty_closes or [])
+        if vf is None:
+            return _vol_no_trade(index, "data_gap", as_of)
+        vol_forecast_pct = vf.annualized_pct
+
+        # Implied vol per index. NIFTY: India VIX. BANKNIFTY: India VIX × 1.20.
+        if vol_implied_provider is not None:
+            vol_implied_pct = vol_implied_provider(index)
+        else:
+            vol_implied_pct = _default_vol_implied(context, index)
+        if vol_implied_pct is None or vol_implied_pct <= 0:
+            return _vol_no_trade(index, "data_gap", as_of)
+
+        chain = chain_loader(index, as_of, expiry)
+        return build_straddle_ticket(
+            index=index, spot=spot,
+            vol_forecast_pct=vol_forecast_pct,
+            vol_implied_pct=vol_implied_pct,
+            mode=mode, capital=capital, expiry=expiry, as_of=as_of,
+            chain=chain, features=features, analog_index=analog_index,
+        )
+
+    cards: list[TradeTicket] = []
+    for index in indices:
+        cards.append(_build_directional_ticket(index))
+        straddle = _build_straddle_card(index)
+        cards.append(dataclasses.replace(straddle, blurb=blurb_for_straddle(straddle)))
 
     staleness = {
         "briefing": briefing.as_of,
