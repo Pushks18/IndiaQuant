@@ -40,17 +40,30 @@ def _render_template(
     blurb_kind: BlurbKind,
 ) -> str:
     if blurb_kind == "no_trade":
-        return f"{index}: no trade. {_reason_pretty(ctx.no_trade_reason_code)}."
+        base = f"{index}: no trade. {_reason_pretty(ctx.no_trade_reason_code)}."
+        if ctx.analog_count > 0:
+            return (
+                f"{base} {ctx.analog_count} analog sessions show "
+                f"{ctx.analog_winrate:.0%} UP rate, {ctx.analog_avg_pnl:+.0f} bps avg."
+            )
+        return base
 
     if ctx.top_drivers:
         drv0_name, drv0_val = ctx.top_drivers[0]
     else:
         drv0_name, drv0_val = "—", 0.0
 
+    if ctx.analog_count > 0:
+        analog_clause = (
+            f"{ctx.analog_count} analog sessions averaged "
+            f"{ctx.analog_winrate:.0%} win rate, "
+            f"{ctx.analog_avg_pnl:+.0f} bps avg return."
+        )
+    else:
+        analog_clause = "no historical analogs available."
     return (
         f"{index} {_DIR_WORD[direction]}: top driver {drv0_name} "
-        f"({drv0_val:+.0f}bps); {ctx.analog_count} analog sessions averaged "
-        f"{ctx.analog_winrate:.0%} win rate, ₹{ctx.analog_avg_pnl:,.0f} avg P&L."
+        f"({drv0_val:+.0f}bps); {analog_clause}"
     )
 
 

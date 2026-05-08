@@ -48,6 +48,44 @@ def _build_default_artifact():
     return artifact
 
 
+def _build_default_analog_index():
+    """Load AnalogIndex from a cached pickle, or build it lazily from the DB.
+
+    On first boot after retraining, the build can take a few seconds (assembles
+    the same training_features frame the LightGBM trainer uses). We cache the
+    result alongside the model pickles so subsequent boots are instant.
+    """
+    from datetime import date
+    from pathlib import Path
+    from india_quant.global_tab.analog_index import AnalogIndex
+
+    cache_path = Path("models/global_tab/analog_index.pkl")
+    if cache_path.exists():
+        try:
+            idx = AnalogIndex.load(cache_path)
+            logger.info("AnalogIndex: loaded {} ({} rows)", cache_path, idx.n_samples)
+            return idx
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("AnalogIndex: cache load failed ({}); rebuilding", exc)
+
+    try:
+        from india_quant.data.db import get_session_factory
+        idx = AnalogIndex.build_from_db(
+            index="NIFTY",
+            start=date(2021, 1, 1),
+            end=date.today(),
+            session_factory=get_session_factory(),
+        )
+        idx.save(cache_path)
+        return idx
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "AnalogIndex: build failed ({}); /global will render with zero analog stats",
+            exc,
+        )
+        return None
+
+
 def create_app() -> Flask:
     app = Flask(
         __name__,
@@ -58,6 +96,7 @@ def create_app() -> Flask:
     # Build the forecaster artifact once at app-init. The first /global
     # request will lazily warm the LightGBM pickle cache.
     app.config["GLOBAL_TAB_ARTIFACT"] = _build_default_artifact()
+    app.config["GLOBAL_TAB_ANALOG_INDEX"] = _build_default_analog_index()
 
     # ── Pages ────────────────────────────────────────────────────────────
 
@@ -245,6 +284,7 @@ def create_app() -> Flask:
             history_provider=_history_provider,
             chain_loader=_chain_loader,
             model_artifact=app.config.get("GLOBAL_TAB_ARTIFACT"),
+            analog_index=app.config.get("GLOBAL_TAB_ANALOG_INDEX"),
         )
 
         try:

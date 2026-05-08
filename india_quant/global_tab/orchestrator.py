@@ -11,6 +11,7 @@ from typing import Any, Callable, Optional
 import pandas as pd
 
 from india_quant.data.fetchers.gift_nifty_fetcher import GiftNiftyQuote
+from india_quant.global_tab.analog_index import AnalogIndex, AnalogStats
 from india_quant.global_tab.briefing import build_briefing
 from india_quant.global_tab.correlation import build_heatmap
 from india_quant.global_tab.forecaster import (
@@ -100,12 +101,14 @@ def _no_trade_ticket(
     features: FeatureRow,
     as_of: datetime,
     confidence: float = 0.0,
+    analog_stats: AnalogStats | None = None,
 ) -> TradeTicket:
+    stats = analog_stats or AnalogStats(0, 0.0, 0.0, False)
     ctx = ReasoningContext(
         top_drivers=_top_attribs(features),
-        analog_count=0,
-        analog_winrate=0.0,
-        analog_avg_pnl=0.0,
+        analog_count=stats.count,
+        analog_winrate=stats.winrate,
+        analog_avg_pnl=stats.avg_return_bps,
         no_trade_reason_code=reason_code,
     )
     return TradeTicket(
@@ -137,6 +140,7 @@ def build_global_view(
     history_provider: Callable[[], pd.DataFrame],
     chain_loader: Callable[[str, datetime, date], Optional[OptionsChainSnapshot]],
     model_artifact: ModelArtifact | None = None,
+    analog_index: AnalogIndex | None = None,
     llm: Any | None = None,
     indices: tuple[str, ...] = ("NIFTY", "BANKNIFTY"),
 ) -> GlobalTabView:
@@ -157,25 +161,41 @@ def build_global_view(
         chain = chain_loader(index, as_of, expiry)
         forecast = forecast_index(index, as_of, mode, features, artifact)
 
+        # Phase 4a: real analog stats. None index → zero-stat fallback (preserves
+        # the Phase 3a behaviour for callers that haven't wired the index yet).
+        if analog_index is not None:
+            stats = analog_index.lookup(features, forecast.direction)
+        else:
+            stats = AnalogStats(0, 0.0, 0.0, False)
+
         if forecast.direction == Direction.NO_TRADE:
-            cards.append(_no_trade_ticket(index, forecast.no_trade_reason_code or "no_overnight_catalyst", features, as_of))
+            cards.append(_no_trade_ticket(
+                index, forecast.no_trade_reason_code or "no_overnight_catalyst",
+                features, as_of, analog_stats=stats,
+            ))
             continue
 
         if chain is None:
-            cards.append(_no_trade_ticket(index, "data_gap", features, as_of, confidence=forecast.confidence))
+            cards.append(_no_trade_ticket(
+                index, "data_gap", features, as_of,
+                confidence=forecast.confidence, analog_stats=stats,
+            ))
             continue
 
         sized = size_trade(forecast, capital, mode, chain)
         if sized is None:
-            cards.append(_no_trade_ticket(index, "below_mode_threshold", features, as_of, confidence=forecast.confidence))
+            cards.append(_no_trade_ticket(
+                index, "below_mode_threshold", features, as_of,
+                confidence=forecast.confidence, analog_stats=stats,
+            ))
             continue
 
         leg, rr, timing = sized
         ctx = ReasoningContext(
             top_drivers=list(forecast.feature_attributions),
-            analog_count=0,        # Phase 4: real analog index
-            analog_winrate=0.0,
-            analog_avg_pnl=0.0,
+            analog_count=stats.count,
+            analog_winrate=stats.winrate,
+            analog_avg_pnl=stats.avg_return_bps,
             no_trade_reason_code=None,
         )
         ticket = TradeTicket(
