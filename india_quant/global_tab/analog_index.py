@@ -97,10 +97,12 @@ class AnalogIndex:
         # Top-decile similarity = 90th percentile of pairwise nearest-neighbor sims.
         # Computed once at build time so .lookup() is O(N) per call.
         nn_sims = []
-        for i in range(min(len(Xz), 500)):  # cap at 500 for build speed
-            sims = Xz @ Xz[i]
-            sims[i] = -np.inf
-            nn_sims.append(float(sims.max()))
+        with np.errstate(over="ignore", divide="ignore", invalid="ignore"):
+            for i in range(min(len(Xz), 500)):  # cap at 500 for build speed
+                sims = Xz @ Xz[i]
+                sims = np.nan_to_num(sims, nan=-np.inf, posinf=-np.inf, neginf=-np.inf)
+                sims[i] = -np.inf
+                nn_sims.append(float(sims.max()))
         threshold = float(np.percentile(nn_sims, 90)) if nn_sims else 1.0
 
         return cls(
